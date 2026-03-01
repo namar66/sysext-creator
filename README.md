@@ -44,7 +44,8 @@ mv sysext-creator.sh ~/.local/bin/sysext-creator
 chmod +x ~/.local/bin/sysext-creator
 
 *Použití
-*Nástroj se spouští uvnitř připraveného Distrobox kontejneru. Pro bezproblémové propojení s hostitelem doporučujeme používat distrobox-enter.
+*Nástroj se spouští uvnitř připraveného Distrobox kontejneru.
+*Pro bezproblémové propojení s hostitelem doporučujeme používat distrobox-enter.
 
 *1. Instalace nové aplikace:
 *Bash
@@ -59,7 +60,8 @@ distrobox-enter -n nazev_kontejneru -- sysext-creator update
 distrobox-enter -n nazev_kontejneru -- sysext-creator rm mc
 
 🔄 Automatizace (Auto-Update)
-* Pro plně bezúdržbový chod doporučujeme vytvořit uživatelský Systemd Timer (~/.config/systemd/user/), který bude pravidelně spouštět sysext-creator update na pozadí.
+* Pro plně bezúdržbový chod doporučujeme vytvořit uživatelský Systemd Timer (~/.config/systemd/user/),
+který bude pravidelně spouštět sysext-creator update na pozadí.
 
 📜 Licence
 Tento projekt je licencován pod GNU General Public License v2.0 (GPLv2).
