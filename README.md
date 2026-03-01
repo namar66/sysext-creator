@@ -1,7 +1,19 @@
 ### :warning:Warning
 * THIS SCRIPT IS IN EARLY STAGES. Use at your own risk
 * Do not deactivate systemd extensions if its being used by critical programs installed in it (Desktop Enviroments, databases, etc).
+* ### ⚠️ Important Warning: Overriding System Files
+Because `systemd-sysext` uses OverlayFS, installing base system packages (like `dnf` or `glibc`) via this script can override critical host system files. 
+This may lead to system crashes or make your Fedora **unbootable**. Use this tool primarily for standalone applications and standard CLI tools.
 
+#### 🚑 How to recover an unbootable system
+If you accidentally create a problematic image and your system refuses to boot, you don't need to reinstall your OS. Just follow these steps:
+1. Reboot your PC and wait for the **GRUB menu** to appear.
+2. Select your default Fedora entry and press **`e`** to edit the boot parameters.
+3. Find the line starting with `linux` (or `linuxefi`) and append the following parameter to the very end of that line:
+   `systemd.mask=systemd-sysext.service`
+4. Press **`Ctrl+X`** or **`F10`** to boot.
+
+Your system will now boot normally with all sysext images temporarily disabled. You can then open your terminal, delete the broken `.raw` file from `/var/lib/extensions/`, and reboot again.
 
 
 # sysext-creator
