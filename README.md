@@ -1,11 +1,20 @@
-### :warning:Warning
-* THIS SCRIPT IS IN EARLY STAGES. Use at your own risk
-* Do not deactivate systemd extensions if its being used by critical programs installed in it (Desktop Enviroments, databases, etc).
-* ### ⚠️ Important Warning: Overriding System Files
-Because `systemd-sysext` uses OverlayFS, installing base system packages (like `dnf` or `glibc`) via this script can override critical host system files. 
-This may lead to system crashes or make your Fedora **unbootable**. Use this tool primarily for standalone applications and standard CLI tools.
+# Sysext-Creator for Fedora (Kinoite/Silverblue)
 
-#### 🚑 How to recover an unbootable system
+Sysext-Creator is a fully automated Bash script for managing additional applications on immutable systems (Fedora Kinoite, Silverblue) using `systemd-sysext` technology. 
+
+The tool combines the dependency resolution logic of the host system (via `rpm-ostree dry-run`) with the flexibility of containers (Distrobox) to create clean, custom-tailored SquashFS images without modifying the base system image.
+
+You can use my original script `sysext-creator.sh` or the refactored version created by GitHub AI `sysext-image-creator-fixed.sh`. Both versions are tested and work perfectly for me. If you find an issue, please let me know!
+
+---
+
+## ⚠️ Important Warnings
+
+* **Early Stages:** THIS SCRIPT IS IN EARLY STAGES. Use at your own risk.
+* **Active Extensions:** Do not deactivate systemd extensions if they are being used by critical programs installed within them (Desktop Environments, databases, etc.).
+* **System Files Override:** Because `systemd-sysext` uses OverlayFS, installing base system packages (like `dnf` or `glibc`) via this script can override critical host system files. This may lead to system crashes or make your Fedora **unbootable**. Use this tool primarily for standalone applications and standard CLI tools.
+
+### 🚑 How to recover an unbootable system
 If you accidentally create a problematic image and your system refuses to boot, you don't need to reinstall your OS. Just follow these steps:
 1. Reboot your PC and wait for the **GRUB menu** to appear.
 2. Select your default Fedora entry and press **`e`** to edit the boot parameters.
@@ -15,53 +24,56 @@ If you accidentally create a problematic image and your system refuses to boot, 
 
 Your system will now boot normally with all sysext images temporarily disabled. You can then open your terminal, delete the broken `.raw` file from `/var/lib/extensions/`, and reboot again.
 
+---
 
-# sysext-creator
-Bash script for creating sysext .raw image
-# Sysext-Creator pro Fedoru (Kinoite/Silverblue)
+## ✨ Features
+* **Install (`install`):** Automatically calculates exact dependencies against the host system and downloads only what is strictly necessary.
+* **Update (`update`):** Detects installed `.raw` images and updates them in bulk (ideal for background execution via a Systemd Timer).
+* **Remove (`rm`):** Safely deletes the image from the disk and immediately applies changes to the running system.
+* **Config Extraction:** Automatically moves global configuration files from `/etc` inside the RPM packages directly to the host system during installation.
 
-Sysext-Creator je plně automatizovaný Bash skript pro správu dodatečných aplikací na immutabilních systémech (Fedora Kinoite, Silverblue) pomocí technologie `systemd-sysext`. 
+## ⚙️ Requirements
+* **Host System:** Fedora Kinoite, Silverblue, Sericea, or Onyx.
+* **Container:** Distrobox container sharing the same Fedora version as the host.
+* **Mount Point:** The extensions folder (`/var/lib/extensions`) must be mounted into the container via bind mount (`--volume /var/lib/extensions:/var/lib/extensions:rw`).
+* **Container Packages:** `squashfs-tools`, `cpio`, `dnf-utils`.
 
-Nástroj spojuje výpočetní logiku hostitelského systému (přes `rpm-ostree dry-run`) s flexibilitou kontejnerů (Distrobox) pro vytváření čistých, na míru šitých SquashFS obrazů bez nutnosti modifikovat základní obraz systému.
+## 📦 Container Setup (First Time Only)
+If you are setting this up on a fresh system, here are the exact commands to create the required Distrobox container and install the necessary tools inside it:
 
-## ✨ Funkce
-* **Instalace (`install`):** Automaticky vypočítá přesné závislosti aplikace vůči hostitelskému systému a stáhne pouze to nejnutnější.
-* **Aktualizace (`update`):** Detekuje nainstalované `.raw` obrazy a hromadně je aktualizuje (ideální pro spouštění na pozadí přes Systemd Timer).
-* **Odinstalace (`rm`):** Bezpečně smaže obraz z disku a okamžitě aplikuje změny do běžícího systému.
-* **Extrakce konfigurací:** Automaticky přesouvá globální konfigurační soubory z `/etc` v RPM balíčcích přímo na při instalaci hostitelský systém.
-* 
-## ⚙️ Požadavky
-* **Hostitelský systém:** Fedora Kinoite, Silverblue, Sericea nebo Onyx.
-* **Kontejner:** Distrobox kontejner sdílející stejnou verzi Fedory jako hostitel.
-* Složka pro rozšíření (`/var/lib/extensions`) připojená do kontejneru přes bind mount (`--volume /var/lib/extensions:/var/lib/extensions:rw`).
-* **Balíčky v kontejneru:** `squashfs-tools`, `cpio`, `dnf-utils`
-
-## 🚀 Instalace
-Skript přesuňte do složky, kterou máte v systémové cestě, a povolte jeho spouštění:
 ```bash
+# 1. Create a Fedora container with the required volume mount
+distrobox create --name sysext-box --image registry.fedoraproject.org/fedora-toolbox:latest --volume /var/lib/extensions:/var/lib/extensions:rw
+
+# 2. Enter the container and install the required packages
+distrobox enter sysext-box -- sudo dnf install -y squashfs-tools cpio dnf-utils
+
+(Note: You can change sysext-box to any container name you prefer.)
+
+🚀 Installation
+Move the script to a folder in your host's system path and make it executable:
+
+Bash
 mkdir -p ~/.local/bin
 mv sysext-creator.sh ~/.local/bin/sysext-creator
 chmod +x ~/.local/bin/sysext-creator
+📖 Usage
+The tool is designed to run inside the prepared Distrobox container. For seamless integration with the host, use distrobox-enter.
 
-*Použití
-*Nástroj se spouští uvnitř připraveného Distrobox kontejneru.
-*Pro bezproblémové propojení s hostitelem doporučujeme používat distrobox-enter.
+1. Install a new application:
 
-*1. Instalace nové aplikace:
-*Bash
-distrobox-enter -n nazev_kontejneru -- sysext-creator install mc
+Bash
+distrobox-enter -n sysext-box -- sysext-creator install mc
+2. Bulk update all applications:
 
-*2. Hromadná aktualizace všech aplikací:
-*Bash
-distrobox-enter -n nazev_kontejneru -- sysext-creator update
+Bash
+distrobox-enter -n sysext-box -- sysext-creator update
+3. Remove an application:
 
-*3. Odstranění aplikace:
-*Bash
-distrobox-enter -n nazev_kontejneru -- sysext-creator rm mc
+Bash
+distrobox-enter -n sysext-box -- sysext-creator rm mc
+🔄 Automation (Auto-Update)
+For maintenance-free operation, we recommend creating a user Systemd Timer (~/.config/systemd/user/) to periodically run sysext-creator update in the background.
 
-🔄 Automatizace (Auto-Update)
-* Pro plně bezúdržbový chod doporučujeme vytvořit uživatelský Systemd Timer (~/.config/systemd/user/),
-který bude pravidelně spouštět sysext-creator update na pozadí.
-
-📜 Licence
-Tento projekt je licencován pod GNU General Public License v2.0 (GPLv2).
+📜 License
+This project is licensed under the GNU General Public License v2.0 (GPLv2).
