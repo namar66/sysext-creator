@@ -41,6 +41,12 @@ Your system will now boot normally with all sysext images temporarily disabled. 
 ## 📦 Container Setup (First Time Only)
 If you are setting this up on a fresh system, here are the exact commands to create the required Distrobox container and install the necessary tools inside it:
 
+for pre-installation distrobox you can use `single-package-sysext.sh` for create sysext from local downloaded *.rpm  after that install distrobox
+with "distrobox-enter -n sysext-box -- sysext-creator install distrobox" and delete "/var/lib/distrobox-1.2.3" folder
+```bash
+chmod +x single-package-sysext.sh
+./single-package-sysext.sh distrobox-1.2.3.rpm
+```
 * (Note: You can change sysext-box to any container name you prefer, with required parameter "--volume /var/lib/extensions:/var/lib/extensions:rw")
 1. Create a Fedora container with the required volume mount
 ```bash
