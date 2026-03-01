@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Sysext-Creator
-# Copyright (C) 2026 Martin Naď (nebo Přezdívka)
+# Copyright (C) 2026 Martin Naď (namar66)
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -151,6 +151,14 @@ if [ -d "$WORKDIR/etc" ]; then
     # Zabalíme obsah etc a přes distrobox-host-exec ho rozbalíme v hostitelském /etc
     tar -czf "$WORKDIR/etc-config.tar.gz" -C "$WORKDIR/etc" .
     distrobox-host-exec sudo tar -xzf "$WORKDIR/etc-config.tar.gz" -C /etc/ --skip-old-files
+	# --- NOVÝ GARBAGE COLLECTOR (TRACKER) ---
+        TRACKER_FILE="$EXT_DIR/etc_tracker.txt"
+        echo "######## $tarball ########" >> "$TRACKER_FILE"
+        # Najdeme všechny soubory, odřízneme $WORKDIR a zapíšeme čisté cesty do logu
+        find "$WORKDIR/etc" -type f | sed "s|$WORKDIR||" >> "$TRACKER_FILE"
+        echo "=> Seznam konfiguračních souborů zapsán do $TRACKER_FILE pro budoucí úklid."
+        # ----------------------------------------
+		
     echo "=> Konfigurace úspěšně zkopírovány do /etc/ na hostiteli."
     fi
     rm -rf "${WORKDIR:?}/etc"
