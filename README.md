@@ -41,37 +41,40 @@ Your system will now boot normally with all sysext images temporarily disabled. 
 ## 📦 Container Setup (First Time Only)
 If you are setting this up on a fresh system, here are the exact commands to create the required Distrobox container and install the necessary tools inside it:
 
+* (Note: You can change sysext-box to any container name you prefer, with required parameter "--volume /var/lib/extensions:/var/lib/extensions:rw")
+1. Create a Fedora container with the required volume mount
 ```bash
-# 1. Create a Fedora container with the required volume mount
 distrobox create --name sysext-box --image registry.fedoraproject.org/fedora-toolbox:latest --volume /var/lib/extensions:/var/lib/extensions:rw
+```
 
-# 2. Enter the container and install the required packages
+2. Enter the container and install the required packages
+```bash
 distrobox enter sysext-box -- sudo dnf install -y squashfs-tools cpio dnf-utils
-
-(Note: You can change sysext-box to any container name you prefer.)
+```
 
 🚀 Installation
 Move the script to a folder in your host's system path and make it executable:
 
-Bash
+```bash
 mkdir -p ~/.local/bin
 mv sysext-creator.sh ~/.local/bin/sysext-creator
 chmod +x ~/.local/bin/sysext-creator
+```
 📖 Usage
 The tool is designed to run inside the prepared Distrobox container. For seamless integration with the host, use distrobox-enter.
 
 1. Install a new application:
 ```Bash
 distrobox-enter -n sysext-box -- sysext-creator install mc
-
+```
 2. Bulk update all applications:
 ```Bash
 distrobox-enter -n sysext-box -- sysext-creator update
-
+```
 3. Remove an application:
 ```Bash
 distrobox-enter -n sysext-box -- sysext-creator rm mc
-
+```
 🔄 Automation (Auto-Update)
 For maintenance-free operation, we recommend creating a user Systemd Timer (~/.config/systemd/user/) to periodically run sysext-creator update in the background.
 
