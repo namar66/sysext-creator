@@ -75,6 +75,7 @@ Apps=$(distrobox-host-exec ls "$EXT_DIR" |grep .raw | sed -E 's/-[0-9].*//' | tr
 echo "Hledám aktualizace pro: $Apps"
 fi
 
+TRACKER_FILE="$EXT_DIR/etc_tracker.txt"
 if [ "$input1" == "rm" ] ; then
     if [ -z "$2" ]; then
         echo "❌ Chyba: K příkazu 'rm' musíš zadat jméno balíčku!" >&2
@@ -83,6 +84,10 @@ if [ "$input1" == "rm" ] ; then
     Apps="$2"
     echo "=> Odstraňuji obraz aplikace $Apps..."
     $privileged2 rm -f "$EXT_DIR/${Apps}-"*.raw
+
+	echo "⚠️ Upozornění: Po aplikaci mohly zůstat konfigurační soubory v hostitelském /etc/:"
+    # Vypíše vše od názvu aplikace až po další křížky (nebo konec souboru)
+    sed -n "/######## $Apps ########/,/########/p" "$TRACKER_FILE" | grep -v "########"
 
     echo "=> Aktualizuji systémové cesty..."
     # Znovu načteme sysext, aby aplikace okamžitě zmizela z běžícího systému
