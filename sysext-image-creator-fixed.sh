@@ -1,45 +1,66 @@
 #!/bin/bash
 
+# Improved Sysext Image Creator Script
+
+# Constants
+LOG_FILE="sysext-image-creator.log"
+
 # Function to log messages
-log() {
-  local msg="$1"
-  echo "$(date +%Y-%m-%d\ %H:%M:%S) - $msg"
+log_message() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
 }
 
-# Error handling function
-handle_error() {
-  local exit_code=$1
-  local msg="$2"
-  if [ $exit_code -ne 0 ]; then
-    log "Error: $msg"
-    exit $exit_code
-  fi
+# Function for error handling
+error_handler() {
+    log_message "Error on line $1"
+    exit 1
 }
 
-# Function to resolve HOST dependencies
+# Set error trap
+trap 'error_handler $LINENO' ERR
+
+# Function for version management
+manage_version() {
+    # Implement version management logic here
+}
+
+# Function for HOST dependency resolution
 resolve_dependencies() {
-  log "Resolving HOST dependencies..."
-  # Code to resolving HOST dependencies goes here
-  # Example placeholder logic:
-  if [ -z "$HOST" ]; then
-    handle_error 1 "HOST variable is not set."
-  fi
-  log "HOST dependencies resolved successfully."
+    # Run dependency resolution from HOST using rpm-ostree
 }
 
-# Helper function: Example
-example_helper() {
-  log "Executing example helper function..."
-  # Sample logic of the helper function goes here
+# Function for package extraction
+extract_packages() {
+    # Implement package extraction logic
 }
 
-# Main function
-main() {
-  log "Starting sysext-image-creator..."
-  resolve_dependencies
-  example_helper
-  log "Completed sysext-image-creator execution."
+# Function to create raw image
+create_raw_image() {
+    # Implement raw image creation logic
 }
 
-# Execute main function
-main
+# Command handlers
+install_package() {
+    log_message "Installing package: $1"
+    # Implement package installation logic
+}
+
+update_package() {
+    log_message "Updating package: $1"
+    # Implement package update logic
+}
+
+remove_package() {
+    log_message "Removing package: $1"
+    # Implement package removal logic
+}
+
+# Main script logic
+log_message "Script started"
+
+# Example usage of commands
+# install_package "example-package"
+# update_package "example-package"
+# remove_package "example-package"
+
+log_message "Script finished"
