@@ -17,24 +17,34 @@
    ```bash
    chmod +x setup.sh sysext-creator.sh
    ```
- 3. Spusť instalaci:
+3. Spusť instalaci:
 
-   ```Bash
-   ./setup.sh
-   ```
+    ```Bash
+    ./setup.sh
+    ```
 Důležité: Restartuj terminál pro načtení práv skupiny sysext-admins.
 
 📖 Použití
-Instalace aplikace: sysext-creator install htop
-
-Odstranění aplikace: sysext-creator rm htop
-
-Seznam aplikací: sysext-creator list
-
-Ruční aktualizace všeho: sysext-creator update
-
-Povýšení po upgradu OS: sysext-creator upgrade-box
-
+Instalace aplikace: 
+  ```Bash
+ sysext-creator install htop
+  ```
+Odstranění aplikace:
+  ```Bash
+  sysext-creator rm htop
+  ```
+Seznam aplikací:
+```Bash
+sysext-creator list
+```
+Ruční aktualizace všeho:
+```Bash
+sysext-creator update
+```
+Povýšení po upgradu OS:
+```Bash
+sysext-creator upgrade-box
+```
 📂 Struktura projektu
 sysext-creator.sh: Hlavní engine běžící uvnitř kontejneru.
 
