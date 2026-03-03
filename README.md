@@ -1,51 +1,73 @@
-# 🚀 Sysext-Creator
+# 💎 Sysext-Creator (v1.1.1)
 
-**Sysext-Creator** je automatizovaný nástroj pro správu systémových rozšíření (`systemd-sysext`) na atomických distribucích (Fedora Silverblue, Kinoite). Umožňuje instalovat aplikace přímo do `/usr` bez nutnosti vrstvení (layering) přes `rpm-ostree`.
+A professional management tool for system extensions (`systemd-sysext`) on **Fedora Atomic** desktops (Silverblue, Kinoite, Aurora). It allows you to install RPM packages into your immutable system without the overhead of `rpm-ostree` layering.
 
-## ✨ Hlavní funkce
-- **Atomické nasazení:** Aplikace běží nativně, ale systém zůstává čistý.
-- **Auto-Update:** Systemd Timer automaticky aktualizuje aplikace na pozadí.
-- **Chytrý Garbage Collector:** Udržuje kontejner pro aktuální verzi OS a jednu verzi zpět (N-1) pro bezpečný rollback.
-- **OS Awareness:** Automaticky detekuje upgrade nebo rollback systému a přebuduje obrazy.
-- **Bezpečný Sudo:** Většina operací probíhá bez nutnosti zadávat heslo díky skupině `sysext-admins`.
-- **Bash Completion:** Našeptávání příkazů a balíčků přes Tabulátor.
+## ✨ Key Features
 
-## 🛠️ Instalace
+* **Bake-on-Site:** Images are built directly on your machine, ensuring 100% compatibility with your specific Fedora version.
+* **EROFS Engine:** Uses the modern, high-performance EROFS filesystem for maximum speed and disk space efficiency.
+* **Safety First:** Built-in safeguards prevent accidental deletion or corruption of the tool itself during updates.
+* **Smart Versioning:** Automatically fixes image naming (avoids `.fc43.fc43` bugs) and detects versions directly from DNF repositories.
+* **Clean System:** Installed applications leave no permanent trace in your `/usr` directory.
 
-1. Stáhni si oba skripty (`sysext-creator.sh` a `setup.sh`) do jedné složky.
-2. Dej jim práva ke spuštění:
-   ```bash
-   chmod +x setup.sh sysext-creator.sh
-   ```
-3. Spusť instalaci:
 
-    ```Bash
-    ./setup.sh
-    ```
-Důležité: Restartuj terminál pro načtení práv skupiny sysext-admins.
 
-📖 Použití
-Instalace aplikace: 
-  ```Bash
- sysext-creator install htop
-  ```
-Odstranění aplikace:
-  ```Bash
-  sysext-creator rm htop
-  ```
-Seznam aplikací:
-```Bash
-sysext-creator list
+## 🚀 Quick Start
+
+### 1. Prepare Your System
+Clone the repository and set up the necessary permissions:
+```bash
+git clone https://github.com/namar66/sysext-creator.git
+cd sysext-creator
+chmod +x *.sh
+./sysext-setup.sh
 ```
-Ruční aktualizace všeho:
-```Bash
+Note: You may need to log out and back in for the group changes to take effect.
+
+2. Bootstrap the Tool
+Build the initial image that activates the sysext-creator command:
+
+```bash
+./build-bundle.sh
+sudo mv sysext-creator-v1.1.1-fc*.raw /var/lib/extensions/
+sudo systemctl restart systemd-sysext.service
+```
+3. Usage
+Now you can manage packages with ease:
+
+# Install a package
+```bash
+sysext-creator install htop
+```
+
+# Update all extensions (the tool automatically skips itself)
+```bash
 sysext-creator update
 ```
-Povýšení po upgradu OS:
-```Bash
-sysext-creator upgrade-box
+# List installed extensions
+```bash
+sysext-creator list
 ```
-📂 Struktura projektu
-sysext-creator.sh: Hlavní engine běžící uvnitř kontejneru.
+# Remove an extension
+```bash
+sysext-creator rm htop
+```
+📂 Project Structure
 
-setup.sh: Instalátor, který nastavuje Systemd Timery, práva a Wrapper.
+`sysext-creator.sh` – The host-side wrapper (main entry point).
+
+`sysext-creator-core.sh` – The engine running inside the build container.
+
+`sysext-setup.sh` – Initial host and SELinux configuration.
+
+`build-bundle.sh` – Script to bootstrap the initial tool image.
+
+🗺️ Roadmap (v1.2)
+[ ] Remove Distrobox dependency (switching to a pure Podman worker).
+
+[ ] Implement self-upgrade command via GitHub Raw API.
+
+[ ] Automated cleanup of temporary Podman build layers.
+
+⚖️ License
+GPLv2 – Created by Martin Naď (2026)
