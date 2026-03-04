@@ -1,87 +1,46 @@
 #!/bin/bash
 set -euo pipefail
 
-# 1. Host and App version detection
-HOST_VER=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2)
-APP_VER=$(grep -E '^readonly SYSEXT_CREATOR_VERSION=' sysext-creator-core.sh | cut -d'"' -f2)
+# 📍 Zjištění fyzické polohy tohoto skriptu (absolutní cesta)
+SRC_DIR=$(dirname "$(realpath "$0")")
 
-if [[ -z "$APP_VER" ]]; then
-    echo "❌ Error: Could not detect version from sysext-creator-core.sh!"
-    exit 1
-fi
+# Načtení verze s využitím přesné cesty
+TOOL_VERSION=$(grep -m 1 '^TOOL_VERSION=' "$SRC_DIR/sysext-creator.sh" | cut -d'"' -f2 || echo "unknown")
+FC_CURRENT=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2)
+FC_NEXT=$((FC_CURRENT + 1))
+EXT_DIR="/var/lib/extensions"
 
-OUTPUT_RAW="sysext-creator-v${APP_VER}-fc${HOST_VER}.raw"
+echo "📦 Bundling Sysext-Creator v${TOOL_VERSION}..."
 
-# We capture your current UID/GID to fix permissions later
-USER_UID=$(id -u)
-USER_GID=$(id -g)
+for VER in $FC_CURRENT $FC_NEXT; do
+    echo "   -> Baking for Fedora $VER..."
 
-echo "💎 Bootstrapping Meta-Image: $OUTPUT_RAW using sudo podman..."
+    WORKDIR=$(mktemp -d)
+    trap 'rm -rf "$WORKDIR"' EXIT
+    BUILD_DIR="$WORKDIR/build_root"
 
-# Running with sudo podman
-sudo podman run --rm -i -v "$PWD:/workspace:Z" -w /workspace "registry.fedoraproject.org/fedora:${HOST_VER}" bash -s "$HOST_VER" "$OUTPUT_RAW" "$APP_VER" "$USER_UID" "$USER_GID" << 'EOF'
-set -euo pipefail
+    mkdir -p "$BUILD_DIR/usr/bin"
+    mkdir -p "$BUILD_DIR/usr/share/kio/servicemenus"
 
-CONTAINER_HOST_VER="$1"
-CONTAINER_OUTPUT_RAW="$2"
-CONTAINER_APP_VER="$3"
-OWNER_UID="$4"
-OWNER_GID="$5"
+    # Kopírování souborů z adresáře, kde se právě nachází tento bundler
+    cp "$SRC_DIR/sysext-creator.sh" "$BUILD_DIR/usr/bin/sysext-creator"
+    cp "$SRC_DIR/sysext-creator-core.sh" "$BUILD_DIR/usr/bin/sysext-creator-core"
+    cp "$SRC_DIR/sysext-setup.sh" "$BUILD_DIR/usr/bin/sysext-setup"
+    cp "$SRC_DIR/build-bundle.sh" "$BUILD_DIR/usr/bin/sysext-creator-bundle"
+    cp "$SRC_DIR/sysext-install.desktop" "$BUILD_DIR/usr/share/kio/servicemenus/"
+    chmod +x "$BUILD_DIR/usr/bin/"*
 
-echo "📦 Installing build tools..."
-dnf install -y erofs-utils cpio dnf-utils > /dev/null 2>&1
+    mkdir -p "$BUILD_DIR/usr/lib/extension-release.d"
+    echo -e "ID=fedora\nVERSION_ID=$VER" > "$BUILD_DIR/usr/lib/extension-release.d/extension-release.sysext-creator"
 
-echo "🏗️ Preparing build root..."
-rm -rf build_root && mkdir -p build_root/usr/bin build_root/usr/lib/extension-release.d build_root/usr/share/bash-completion/completions
+    TARGET_RAW="sysext-creator-v${TOOL_VERSION}-fc${VER}.raw"
+    mkfs.erofs -zlz4hc --force-uid=0 --force-gid=0 "$WORKDIR/$TARGET_RAW" "$BUILD_DIR" >/dev/null 2>&1
 
-# 1. Bash Completion
-cat << 'COMPLETION' > build_root/usr/share/bash-completion/completions/sysext-creator
-_sysext_creator_completions() {
-    local cur prev commands installed_pkgs
-    cur="${COMP_WORDS[COMP_CWORD]}"
-    prev="${COMP_WORDS[COMP_CWORD-1]}"
-    commands="install update rm list upgrade-box"
-    if [[ ${COMP_CWORD} -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "${commands}" -- "${cur}") )
-        return 0
-    fi
-    if [[ "${prev}" == "rm" ]]; then
-        installed_pkgs=$(ls /var/lib/extensions/*.raw 2>/dev/null | xargs -n 1 basename 2>/dev/null | sed -E 's/-[0-9].*//' | sort -u)
-        COMPREPLY=( $(compgen -W "${installed_pkgs}" -- "${cur}") )
-        return 0
-    fi
-    COMPREPLY=()
-}
-complete -F _sysext_creator_completions sysext-creator
-COMPLETION
+    sudo rm -f "$EXT_DIR/sysext-creator-"*"-fc${VER}.raw"
+    sudo mv "$WORKDIR/$TARGET_RAW" "$EXT_DIR/"
 
-# 2. Scripts
-cp sysext-creator.sh build_root/usr/bin/sysext-creator
-cp sysext-creator-core.sh build_root/usr/bin/sysext-creator-core
-cp sysext-setup.sh build_root/usr/bin/sysext-setup
-chmod +x build_root/usr/bin/*
-
-# 3. Dependencies
-mkdir -p build_temp && cd build_temp
-dnf download distrobox erofs-utils > /dev/null 2>&1
-for f in *.rpm; do
-    rpm2cpio "$f" | cpio -idm -D ../build_root --quiet 2>/dev/null || true
+    trap - EXIT
+    rm -rf "$WORKDIR"
 done
-cd .. && rm -rf build_temp
 
-# 4. Metadata
-cat << META > "build_root/usr/lib/extension-release.d/extension-release.sysext-creator-v${CONTAINER_APP_VER}-fc${CONTAINER_HOST_VER}"
-ID=fedora
-VERSION_ID=${CONTAINER_HOST_VER}
-META
-
-# 5. Bake
-echo "🔥 Baking EROFS image..."
-mkfs.erofs -zlz4hc --force-uid=0 --force-gid=0 "$CONTAINER_OUTPUT_RAW" build_root > /dev/null
-
-# 🔑 FIX: Return ownership to the host user
-chown "${OWNER_UID}:${OWNER_GID}" "$CONTAINER_OUTPUT_RAW"
-rm -rf build_root
-EOF
-
-echo "✅ DONE! Your final self-contained tool is ready: $OUTPUT_RAW"
+echo "✨ Bundle complete! Images deployed to $EXT_DIR."

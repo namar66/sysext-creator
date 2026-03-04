@@ -1,73 +1,76 @@
-# 💎 Sysext-Creator (v1.1.1)
+💎 Sysext-Creator (v1.2.0)
+A professional management tool for system extensions (systemd-sysext) on Fedora Atomic desktops (Silverblue, Kinoite, Aurora). It allows you to install RPM packages directly into your immutable system without the overhead of rpm-ostree layering or the need for a reboot.
 
-A professional management tool for system extensions (`systemd-sysext`) on **Fedora Atomic** desktops (Silverblue, Kinoite, Aurora). It allows you to install RPM packages into your immutable system without the overhead of `rpm-ostree` layering.
+✨ Key Features (v1.2.0)
+Pure Podman Architecture: Completely removed Distrobox dependency. Baking now takes place in an isolated, lightweight container managed directly via Podman.
 
-## ✨ Key Features
+KDE Dolphin Integration: Install downloaded RPM files with a single click using the "Install as System Extension" context menu action.
 
-* **Bake-on-Site:** Images are built directly on your machine, ensuring 100% compatibility with your specific Fedora version.
-* **EROFS Engine:** Uses the modern, high-performance EROFS filesystem for maximum speed and disk space efficiency.
-* **Safety First:** Built-in safeguards prevent accidental deletion or corruption of the tool itself during updates.
-* **Smart Versioning:** Automatically fixes image naming (avoids `.fc43.fc43` bugs) and detects versions directly from DNF repositories.
-* **Clean System:** Installed applications leave no permanent trace in your `/usr` directory.
+Self-Upgrade System: The tool can now update itself directly from GitHub using the self-upgrade command.
 
+N+1 Version Readiness: During every build, the tool automatically prepares images for both the current and the next Fedora version, ensuring a seamless transition after a major OS upgrade.
 
+EROFS Engine: Utilizes the high-performance EROFS filesystem for maximum speed and disk space efficiency.
 
-## 🚀 Quick Start
+Clean System Philosophy: Extensions exist only as a virtual layer in /usr, leaving no permanent trace in the base OS image.
 
-### 1. Prepare Your System
-Clone the repository and set up the necessary permissions:
-```bash
+🚀 Quick Start
+Version 1.2.0 introduces a fully automated setup process:
+
+1. Download and Setup
+Clone the repository and run the setup script. This will configure the Podman worker and deploy the tool into your system.
+
+```Bash
 git clone https://github.com/namar66/sysext-creator.git
 cd sysext-creator
 chmod +x *.sh
 ./sysext-setup.sh
 ```
-Note: You may need to log out and back in for the group changes to take effect.
+2. Ready to Go!
+The tool is now integrated into your OS. You can safely delete the cloned folder. Start using the sysext-creator command globally in your terminal or use the right-click menu in Dolphin.
 
-2. Bootstrap the Tool
-Build the initial image that activates the sysext-creator command:
+🛠️ Usage
+Terminal (CLI)
 
-```bash
-./build-bundle.sh
-sudo mv sysext-creator-v1.1.1-fc*.raw /var/lib/extensions/
-sudo systemctl restart systemd-sysext.service
+# Install a package from repositories
+```Bash
+sysext-creator install vivaldi
 ```
-3. Usage
-Now you can manage packages with ease:
-
-# Install a package
-```bash
-sysext-creator install htop
-```
-
-# Update all extensions (the tool automatically skips itself)
-```bash
+# Update all installed extensions
+```Bash
 sysext-creator update
 ```
-# List installed extensions
-```bash
-sysext-creator list
+# Check for available updates without installing
+```Bash
+sysext-creator update-check
 ```
+
 # Remove an extension
-```bash
+```Bash
 sysext-creator rm htop
 ```
+# Update Sysext-Creator itself
+sysext-creator self-upgrade
+Graphical Interface (KDE Dolphin)
+Locate any .rpm file in Dolphin.
+
+Right-click the file and select "Install as System Extension".
+
 📂 Project Structure
+`sysext-creator.sh` – The host-side orchestrator (The Conductor).
 
-`sysext-creator.sh` – The host-side wrapper (main entry point).
+`sysext-creator-core.sh` – The build logic running inside the container (The Worker).
 
-`sysext-creator-core.sh` – The engine running inside the build container.
+`sysext-setup.sh` – Podman container initialization and first-time deployment.
 
-`sysext-setup.sh` – Initial host and SELinux configuration.
+`build-bundle.sh` – Generates system images for the tool itself (The Baker).
 
-`build-bundle.sh` – Script to bootstrap the initial tool image.
+`sysext-install.desktop` – KDE Dolphin context menu integration.
 
-🗺️ Roadmap (v1.2)
-[ ] Remove Distrobox dependency (switching to a pure Podman worker).
+🗺️ Roadmap (v1.3)
+[ ] KCM Module: Native control panel integrated into KDE System Settings.
 
-[ ] Implement self-upgrade command via GitHub Raw API.
-
-[ ] Automated cleanup of temporary Podman build layers.
+[ ] Desktop Notifications: Stay informed about available extension updates via the system tray.
 
 ⚖️ License
 GPLv2 – Created by Martin Naď (2026)

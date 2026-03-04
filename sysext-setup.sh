@@ -1,42 +1,47 @@
 #!/bin/bash
 set -euo pipefail
 
+# ⚙️ KONFIGURACE
 HOST_VERSION=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2)
-CONTAINER_NAME="sysext-box-fc${HOST_VERSION}"
-STATE_DIR="$HOME/.local/state/sysext-creator"
-SENTINEL_FILE="${STATE_DIR}/presetup_done"
+CONTAINER_NAME="sysext-worker-fc${HOST_VERSION}"
+IMAGE="registry.fedoraproject.org/fedora:${HOST_VERSION}"
+WORKSPACE="$HOME/.cache/sysext-creator-workspace"
 
-echo "🔧 Configuring the host system..."
+echo "⚙️  Setting up Sysext-Creator v1.2.0 (Pure Podman Edition)..."
 
-# 1. Permissions and Groups
-! getent group sysext-admins >/dev/null && sudo groupadd -f sysext-admins
-sudo usermod -aG sysext-admins "$USER"
+# 1. Příprava pracovní složky
+mkdir -p "$WORKSPACE"
 
-# Create directories including .d for future symlinks
-sudo mkdir -p /var/lib/extensions /var/lib/extensions.d /run/extensions
-sudo chown root:sysext-admins /var/lib/extensions /var/lib/extensions.d
-sudo chmod 775 /var/lib/extensions /var/lib/extensions.d
-
-# Apply SELinux contexts (Fedora standard)
-sudo restorecon -RFv /var/lib/extensions /var/lib/extensions.d /run/extensions
-
-# Set up Sudoers for systemd-sysext service
-echo "%sysext-admins ALL=(root) NOPASSWD: /usr/bin/systemctl restart systemd-sysext.service, /usr/bin/systemctl stop systemd-sysext.service" | sudo tee /etc/sudoers.d/sysext-creator > /dev/null
-sudo chmod 440 /etc/sudoers.d/sysext-creator
-
-# 2. Create the working container
-if ! distrobox list | grep -q "$CONTAINER_NAME"; then
-    echo "📦 Creating container $CONTAINER_NAME..."
-    distrobox create --name "$CONTAINER_NAME" --image registry.fedoraproject.org/fedora-toolbox:${HOST_VERSION} --volume /var/lib/extensions:/var/lib/extensions:rw --volume /var/lib/extensions.d:/var/lib/extensions.d:rw -Y
-    distrobox enter "$CONTAINER_NAME" -- sudo dnf install -y erofs-utils cpio dnf-utils
+# 2. Vytvoření kontejneru (pokud neexistuje)
+if sudo podman container exists "$CONTAINER_NAME" >/dev/null 2>&1; then
+    echo "✅ Worker container '$CONTAINER_NAME' already exists."
+else
+    echo "🏗️  Creating persistent worker container..."
+    # Mountujeme repozitáře i GPG klíče pro bezpečné ověřování balíčků
+    sudo podman create \
+        --name "$CONTAINER_NAME" \
+        --user root \
+        -v "$WORKSPACE:/workspace:Z" \
+        -v /etc/yum.repos.d:/etc/yum.repos.d:ro \
+        -v /etc/pki/rpm-gpg:/etc/pki/rpm-gpg:ro \
+        -w /workspace \
+        "$IMAGE" /usr/bin/sleep infinity >/dev/null
+    echo "✅ Worker container created."
 fi
 
-# 3. Final verification
-if sudo -n /usr/bin/systemctl restart systemd-sysext.service &>/dev/null; then
-    mkdir -p "$STATE_DIR"
-    touch "$SENTINEL_FILE"
-    echo "✅ Setup successful. Everything is ready to use!"
+# 3. Příprava nástrojů uvnitř kontejneru
+echo "📦 Installing build tools inside the worker..."
+sudo podman start "$CONTAINER_NAME" >/dev/null
+sudo podman exec "$CONTAINER_NAME" dnf install -y erofs-utils cpio dnf-utils --nodocs --quiet
+echo "✅ Tools installed."
+
+# 4. SAMOINSTALACE DO SYSTÉMU
+echo "🚀 Deploying Sysext-Creator as a system extension..."
+if [[ -x "./build-bundle.sh" ]]; then
+    ./build-bundle.sh
+    sudo systemctl restart systemd-sysext.service
+    echo -e "\n🎉 Setup complete! You can now use 'sysext-creator' globally."
+    echo "   (The original folder can be safely removed.)"
 else
-    echo "⚠️  Setup completed, but Sudo privileges are not fully active yet."
-    echo "⚠️  IMPORTANT: Please Log out and Log in again to apply group changes."
+    echo "⚠️  Warning: build-bundle.sh not found. Tool was not installed to /usr/bin/."
 fi
