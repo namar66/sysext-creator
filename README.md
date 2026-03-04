@@ -1,4 +1,4 @@
-💎 use version 1.0 new versions are broken for now
+# use version 1.0 new versions are broken for now
 💎 Sysext-Creator (v1.2.0)
 A professional management tool for system extensions (systemd-sysext) on Fedora Atomic desktops (Silverblue, Kinoite, Aurora). It allows you to install RPM packages directly into your immutable system without the overhead of rpm-ostree layering or the need for a reboot.
 
