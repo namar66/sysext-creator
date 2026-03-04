@@ -1,7 +1,4 @@
 #!/bin/bash
-
-set -e
-=======
 set -euo pipefail
 
 # ⚙️ KONFIGURACE
