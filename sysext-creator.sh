@@ -139,6 +139,10 @@ cmd_install() {
     # Vytáhneme verzi balíčku
     local available_pkg_string=$(echo "$dry_run" | sed -n '/packages:/,$p' | grep -E "^  $pkg_name-[0-9]" | head -n1 | awk '{print $1}')
     local available_ver=$(echo "$available_pkg_string" | sed -E "s/^${pkg_name}-//; s/\.[^.]+$//")
+    if [[ -z "$available_ver" || "$available_ver" == "unknown" ]]; then
+        echo "❌ Error: Nepodařilo se zjistit přesnou verzi balíčku. Zkuste zadat plný název (např. 'vivaldi-stable' místo '$pkg_name')."
+        return 1
+    fi
 
     echo "   Installed: $current_ver"
     echo "   Available: ${available_ver:-unknown}"
