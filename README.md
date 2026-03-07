@@ -35,6 +35,8 @@ chmod +x *.sh
 * `sysext-creator rm htop`
 * Update images
 * `sysext-creator updates`
+* Check-update
+* `sysext-creator check-update`
 * OS Upgrade (Major Version)After a major Fedora upgrade (e.g., F43 to F44), rebuild your extensions for the new base.
 * `sysext-creator upgrade-box`
 * 📝 Configuration & SafetyBlacklist: Critical system packages like glibc, kernel, and shadow-utils are blocked from installation to ensure system stability.
