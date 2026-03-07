@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-echo "🚀 Starting Sysext-Creator environment setup (v1.4.1)..."
+echo "🚀 Starting Sysext-Creator environment setup (v1.4.3)..."
 
 # 1. CONSTANTS & PREPARATION
 HOST_VERSION=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
@@ -138,7 +138,7 @@ fi
 # 5. STEP: Container & Tools Setup
 CONTAINER_NAME="sysext-box-fc${HOST_VERSION}"
 echo "=> Creating build container '$CONTAINER_NAME'..."
-distrobox create --name "$CONTAINER_NAME" --image registry.fedoraproject.org/fedora-toolbox:${HOST_VERSION} --volume "$STAGING_DIR":"$STAGING_DIR":rw -Y
+distrobox create --name "$CONTAINER_NAME" --image registry.fedoraproject.org/fedora-toolbox:${HOST_VERSION} --volume "$STAGING_DIR":"$STAGING_DIR":rw --volume "/etc/yum.repos.d:/etc/yum.repos.d:ro" -Y
 
 echo "=> Installing dependencies inside container..."
 distrobox enter "$CONTAINER_NAME" -- sudo dnf install -y erofs-utils cpio dnf-utils
@@ -165,6 +165,85 @@ WantedBy=timers.target
 EOF
 systemctl --user daemon-reload
 systemctl --user enable --now sysext-update.timer
+
+# 6. STEP: KDE Dolphin Integration (Kinoite / KDE specific)
+echo "=> Kontroluji desktopové prostředí pro volitelnou integraci..."
+
+# Detekce KDE Plasma (přes proměnnou prostředí nebo os-release)
+if grep -iq "kinoite" /etc/os-release || [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]]; then
+    echo "=> Detekováno prostředí KDE Plasma. Instaluji integraci pro Dolphin..."
+
+    MENU_DIR="$HOME/.local/share/kio/servicemenus"
+    mkdir -p "$MENU_DIR"
+
+    # Vytvoření .desktop souboru s MimeType a ServiceTypes
+    cat << 'EOF' > "$MENU_DIR/sysext-install.desktop"
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=application/x-rpm;
+Actions=installAsSysext;
+X-KDE-Priority=TopLevel
+Icon=package-x-generic
+
+[Desktop Action installAsSysext]
+Name=Instalovat jako System Extension
+Icon=system-software-install
+Exec=konsole -e bash -c "~/.local/bin/sysext-creator install '%f'; echo -e '\n✨ Hotovo! Okno se zavře za 3 sekundy...'; sleep 3"
+EOF
+
+    chmod +x "$MENU_DIR/sysext-install.desktop"
+
+    # Obnova cache pro Dolphin (aby se menu objevilo hned bez restartu)
+    if command -v kbuildsycoca6 &> /dev/null; then
+        kbuildsycoca6 &>/dev/null || true
+        echo "✅ Kontextové menu pro Dolphin bylo úspěšně přidáno a aktivováno."
+    fi
+else
+    echo "=> Prostředí KDE nebylo detekováno (běžíte pravděpodobně na GNOME/Silverblue). Přeskakuji integraci Dolphinu."
+fi
+# 7. STEP: Bash Completion Setup
+echo "=> Konfiguruji automatické doplňování pro Bash..."
+
+COMPLETION_DIR="$HOME/.local/share/bash-completion/completions"
+mkdir -p "$COMPLETION_DIR"
+
+cat << 'EOF' > "$COMPLETION_DIR/sysext-creator"
+_sysext_creator_completions() {
+    local cur prev cmds
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+
+    # Základní příkazy (install-local uživatel psát nemusí, wrapper to pozná sám)
+    cmds="install update check-update rm list"
+
+    if [[ ${COMP_CWORD} -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "${cmds}" -- "${cur}") )
+        return 0
+    fi
+
+    case "${prev}" in
+        install)
+            # Povolí standardní doplňování cest k souborům (pro lokální RPM)
+            compopt -o default
+            COMPREPLY=()
+            ;;
+        rm)
+            # Bleskově vytáhne seznam aktuálně nainstalovaných rozšíření z hostitele
+            local installed=$(ls /var/lib/extensions/*.raw 2>/dev/null | xargs -n1 basename -s .raw 2>/dev/null || true)
+            COMPREPLY=( $(compgen -W "${installed}" -- "${cur}") )
+            ;;
+        *)
+            ;;
+    esac
+}
+complete -F _sysext_creator_completions sysext-creator
+EOF
+
+# Aktivace pro aktuální sezení (aby to fungovalo hned bez odhlášení, pokud uživatel script sourcuje)
+source "$COMPLETION_DIR/sysext-creator" 2>/dev/null || true
+echo "✅ Bash completion úspěšně nainstalován."
 
 echo "--------------------------------------------------------"
 echo "✅ Setup complete! System is now self-bootstrapped."
