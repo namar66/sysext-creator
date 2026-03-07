@@ -1,6 +1,7 @@
 * 📦 Sysext-Creator (Resilient Edition)Sysext-Creator is a high-performance, event-driven tool for Fedora Atomic (Silverblue, Kinoite, Sway Atomic). It allows you to install traditional RPM packages as dynamic system extensions (systemd-sysext) with a 100% rootless daily workflow.
 * 🌟 Key Features
-* ⚡ Zero-Sudo Workflow: After initial setup, manage your apps without ever typing a password.
+* ⚡ Zero-Sudo Workflow if you install from repo: After initial setup, manage your apps without ever typing a password.
+* (Note: requires sudo to install local packages.)
 * 📡 Asynchronous IPC: Uses a request-reply model between a rootless Distrobox and a host daemon.
 * 🛡️ Self-Healing Container: Automatically detects missing mount points or OS version mismatches and repairs the environment.
 * 🗜️ EROFS Compression: Uses high-performance lz4hc compression for minimal disk footprint and maximum speed.
