@@ -1,77 +1,41 @@
-# use version 1.0 new versions are broken for now
-💎 Sysext-Creator (v1.2.0)
-A professional management tool for system extensions (systemd-sysext) on Fedora Atomic desktops (Silverblue, Kinoite, Aurora). It allows you to install RPM packages directly into your immutable system without the overhead of rpm-ostree layering or the need for a reboot.
-
-✨ Key Features (v1.2.0)
-Pure Podman Architecture: Completely removed Distrobox dependency. Baking now takes place in an isolated, lightweight container managed directly via Podman.
-
-KDE Dolphin Integration: Install downloaded RPM files with a single click using the "Install as System Extension" context menu action.
-
-Self-Upgrade System: The tool can now update itself directly from GitHub using the self-upgrade command.
-
-N+1 Version Readiness: During every build, the tool automatically prepares images for both the current and the next Fedora version, ensuring a seamless transition after a major OS upgrade.
-
-EROFS Engine: Utilizes the high-performance EROFS filesystem for maximum speed and disk space efficiency.
-
-Clean System Philosophy: Extensions exist only as a virtual layer in /usr, leaving no permanent trace in the base OS image.
-
-🚀 Quick Start
-Version 1.2.0 introduces a fully automated setup process:
-
-1. Download and Setup
-Clone the repository and run the setup script. This will configure the Podman worker and deploy the tool into your system.
-
+* 📦 Sysext-Creator (Resilient Edition)Sysext-Creator is a high-performance, event-driven tool for Fedora Atomic (Silverblue, Kinoite, Sway Atomic). It allows you to install traditional RPM packages as dynamic system extensions (systemd-sysext) with a 100% rootless daily workflow.
+* 🌟 Key Features
+* ⚡ Zero-Sudo Workflow: After initial setup, manage your apps without ever typing a password.
+* 📡 Asynchronous IPC: Uses a request-reply model between a rootless Distrobox and a host daemon.
+* 🛡️ Self-Healing Container: Automatically detects missing mount points or OS version mismatches and repairs the environment.
+* 🗜️ EROFS Compression: Uses high-performance lz4hc compression for minimal disk footprint and maximum speed.
+* 🧹 Smart Cleanup: Interactive /etc configuration management and an "N-1" garbage collector for old containers.
+* 🏗️ Architecture: How it Works Sysext-Creator uses a Staging Area at /var/tmp/sysext-staging to facilitate communication between two distinct layers:
+* The Client (sysext-creator-core): Runs inside a rootless Distrobox. It downloads RPMs, extracts them, and creates an EROFS image.
+* The Watcher (systemd-deploy.path):* A native host unit that monitors the staging area for new files.
+* The Daemon (sysext-creator-deploy.sh): Triggered by the watcher, this script runs with host privileges to deploy the image and refresh system extensions.
+* 🚀 Installation
+* requires distrobox installed check `https://distrobox.it`
+* Clone the repository:
 ```Bash
-git clone https://github.com/namar66/sysext-creator.git
+git clone https://github.com/yourusername/sysext-creator.git
+```
+```Bash
 cd sysext-creator
 chmod +x *.sh
-./sysext-setup.sh
 ```
-2. Ready to Go!
-The tool is now integrated into your OS. You can safely delete the cloned folder. Start using the sysext-creator command globally in your terminal or use the right-click menu in Dolphin.
-
-🛠️ Usage
-Terminal (CLI)
-
-# Install a package from repositories
+* Run the setup script:
 ```Bash
-sysext-creator install vivaldi
+./sysext-creator-setup.sh
 ```
-# Update all installed extensions
-```Bash
-sysext-creator update
-```
-# Check for available updates without installing
-```Bash
-sysext-creator update-check
-```
-
-# Remove an extension
-```Bash
-sysext-creator rm htop
-```
-# Update Sysext-Creator itself
-sysext-creator self-upgrade
-Graphical Interface (KDE Dolphin)
-Locate any .rpm file in Dolphin.
-
-Right-click the file and select "Install as System Extension".
-
-📂 Project Structure
-`sysext-creator.sh` – The host-side orchestrator (The Conductor).
-
-`sysext-creator-core.sh` – The build logic running inside the container (The Worker).
-
-`sysext-setup.sh` – Podman container initialization and first-time deployment.
-
-`build-bundle.sh` – Generates system images for the tool itself (The Baker).
-
-`sysext-install.desktop` – KDE Dolphin context menu integration.
-
-🗺️ Roadmap (v1.3)
-[ ] KCM Module: Native control panel integrated into KDE System Settings.
-
-[ ] Desktop Notifications: Stay informed about available extension updates via the system tray.
-
-⚖️ License
-GPLv2 – Created by Martin Naď (2026)
+* (Note: This is the only step that requires sudo to install the system daemon.)
+* Restart your terminal to enable bash completion.
+* 🛠️ Usage
+* Install an Application Fetches the package and its dependencies from the host's Fedora repositories.
+* `sysext-creator install htop`
+* List Installed Packages Queries the host daemon for accurate versioning of active extensions.
+* `sysext-creator list`
+* Remove an Application Unmounts the image and interactively asks to clean up configuration files in /etc.
+* `sysext-creator rm htop`
+* Update images
+* `sysext-creator updates`
+* OS Upgrade (Major Version)After a major Fedora upgrade (e.g., F43 to F44), rebuild your extensions for the new base.
+* `sysext-creator upgrade-box`
+* 📝 Configuration & SafetyBlacklist: Critical system packages like glibc, kernel, and shadow-utils are blocked from installation to ensure system stability.
+* Throttling: The list command includes a 0.5s throttle to prevent saturating the Systemd event loop, ensuring reliable communication with the host daemon.
+* 📜 LicenseThis project is licensed under the GNU General Public License v2.
