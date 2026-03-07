@@ -1,219 +1,66 @@
 #!/bin/bash
-set -euo pipefail
-
-# ⚙️ KONFIGURACE
-TOOL_VERSION="1.2.0"
-GH_USER="namar66"
-REPO="sysext-creator"
-BRANCH="main"
 HOST_VERSION=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2)
-CONTAINER_NAME="sysext-worker-fc${HOST_VERSION}"
-WORKSPACE="$HOME/.cache/sysext-creator-workspace"
-EXT_DIR="/var/lib/extensions"
+CONTAINER_NAME="sysext-box-fc${HOST_VERSION}"
+STAGING_DIR="/var/tmp/sysext-staging"
 
-# --- OCHRANNÉ FUNKCE ---
-is_blacklisted() {
-    local pkg="$1"
-    case "$pkg" in
-        kernel*|systemd*|glibc*|dbus*|pam|dracut*|grub2*|selinux-policy*|sysext-creator*|update)
-            return 0 ;;
-        *)
-            return 1 ;;
-    esac
-}
-
-# --- PŘÍKAZY ---
-cmd_self_upgrade() {
-    echo "🌐 Checking for tool updates on GitHub..."
-    local raw_url="https://raw.githubusercontent.com/$GH_USER/$REPO/$BRANCH"
-    local upgrade_dir="$WORKSPACE/upgrade"
-
-    mkdir -p "$upgrade_dir"
-
-    curl -sSL "$raw_url/sysext-creator.sh" -o "$upgrade_dir/sysext-creator.sh"
-
-    if [[ ! -s "$upgrade_dir/sysext-creator.sh" ]]; then
-        echo "❌ Failed to connect to GitHub."
-        rm -rf "$upgrade_dir"
+# Function to verify if the container has the required volume mounted
+check_container_mounts() {
+    # Check if container exists
+    if ! distrobox list | grep -q "$CONTAINER_NAME"; then
         return 1
     fi
 
-    local remote_ver=$(grep -m 1 '^TOOL_VERSION=' "$upgrade_dir/sysext-creator.sh" | cut -d'"' -f2 || true)
+    # Inspect container mounts to find our staging directory
+    local mount_exists
+    mount_exists=$(podman inspect "$CONTAINER_NAME" --format '{{range .Mounts}}{{.Source}}:{{.Destination}} {{end}}' | grep "$STAGING_DIR" || true)
 
-    echo "   Installed: ${TOOL_VERSION:-unknown}"
-    echo "   Available: ${remote_ver:-unknown}"
-
-    if [[ -n "$remote_ver" && "$TOOL_VERSION" == "$remote_ver" ]]; then
-        echo "✅ Sysext-Creator is already up to date."
-        rm -rf "$upgrade_dir"
-        return 0
+    if [[ -z "$mount_exists" ]]; then
+        echo "⚠️ Warning: Container '$CONTAINER_NAME' is missing the required mount: $STAGING_DIR"
+        return 1
     fi
 
-    echo "⬇️ Downloading latest core scripts..."
-    curl -sSL "$raw_url/sysext-creator-core.sh" -o "$upgrade_dir/sysext-creator-core.sh"
-    curl -sSL "$raw_url/build-bundle.sh" -o "$upgrade_dir/build-bundle.sh"
-    curl -sSL "$raw_url/sysext-setup.sh" -o "$upgrade_dir/sysext-setup.sh"
-    chmod +x "$upgrade_dir/"*.sh
-
-    if [[ -x "$upgrade_dir/build-bundle.sh" ]]; then
-        echo "🔄 Re-bundling the tool as a system extension..."
-        "$upgrade_dir/build-bundle.sh"
-        sudo systemctl restart systemd-sysext.service
-        echo "✨ Self-upgrade to v$remote_ver successful!"
-    else
-        echo "❌ Failed to download core scripts."
-    fi
-    rm -rf "$upgrade_dir"
+    return 0
 }
 
-cmd_update_check() {
-    echo "🔄 Refreshing repository metadata..."
-    rpm-ostree refresh-md >/dev/null
+# Logic to ensure the container is ready and correctly configured
+if [ "${1:-}" == "upgrade-box" ] || ! check_container_mounts; then
+    echo "📦 Ensuring container '$CONTAINER_NAME' is ready with correct mounts..."
 
-    echo "📊 Checking for available updates..."
-    local pkgs=$(ls "$EXT_DIR" 2>/dev/null | grep "\.raw$" | sed -E 's/-(v?[0-9]|fc[0-9]).*//' | sort -u)
-    local updates_available=0
+    # If container exists but is invalid or upgrade is requested, remove it
+    if distrobox list | grep -q "$CONTAINER_NAME"; then
+        echo "=> Re-creating container to fix mounts or perform upgrade..."
+        distrobox rm -f "$CONTAINER_NAME"
+    fi
 
-    echo "--------------------------------------------------------------------------------"
-    printf "%-20s | %-25s | %-25s\n" "PACKAGE" "INSTALLED" "AVAILABLE"
-    echo "--------------------------------------------------------------------------------"
+    echo "=> Creating container '$CONTAINER_NAME' with volume '$STAGING_DIR'..."
+    distrobox create --name "$CONTAINER_NAME" \
+        --image registry.fedoraproject.org/fedora-toolbox:${HOST_VERSION} \
+        --volume "$STAGING_DIR":"$STAGING_DIR":rw -Y
 
-    for pkg in $pkgs; do
-        [[ -z "$pkg" || "$pkg" == sysext-creator* ]] && continue
+    echo "=> Installing required tools inside the container..."
+    distrobox enter "$CONTAINER_NAME" -- sudo dnf install -y erofs-utils cpio dnf-utils
 
-        local current_file=$(ls "$EXT_DIR" 2>/dev/null | grep "^${pkg}-" | head -n1 || true)
-        local current_ver="none"
-        if [[ -n "$current_file" ]]; then
-            current_ver=$(echo "$current_file" | sed -E "s/^${pkg}-//; s/\.raw$//")
+    # If this was an upgrade-box command, trigger the update and cleanup
+    if [ "${1:-}" == "upgrade-box" ]; then
+        echo "🔄 Rebuilding installed applications for the new OS version..."
+        distrobox-enter -n "$CONTAINER_NAME" -- sysext-creator-core update
+        echo "✅ Rebuild complete!"
+
+        # Garbage Collector (N-1 rule)
+        OLD_BOXES=$(distrobox list --no-color | grep -o "sysext-box-fc[0-9]*" | grep -v "$CONTAINER_NAME" | sort -u || true)
+        if [ -n "$OLD_BOXES" ]; then
+            echo "🧹 Running Garbage Collector..."
+            BOXES_TO_DELETE=$(echo "$OLD_BOXES" | tr ' ' '\n' | sort -r | tail -n +2)
+            if [ -n "$BOXES_TO_DELETE" ]; then
+                 for box in $BOXES_TO_DELETE; do
+                     echo "🗑️ Deleting obsolete container: '$box'"
+                     distrobox rm -f "$box"
+                 done
+            fi
         fi
-
-        local dry_run=$(rpm-ostree install --dry-run "$pkg" 2>/dev/null || true)
-        local available_ver="unknown"
-        if [[ -n "$dry_run" && "$dry_run" == *"packages:"* ]]; then
-            local available_pkg_string=$(echo "$dry_run" | sed -n '/packages:/,$p' | grep -E "^  $pkg-[0-9]" | head -n1 | awk '{print $1}')
-            available_ver=$(echo "$available_pkg_string" | sed -E "s/^${pkg}-//; s/\.[^.]+$//")
-        fi
-
-        if [[ "$current_ver" != "$available_ver" && "$available_ver" != "unknown" ]]; then
-            printf "%-20s | %-25s | %-25s 🆕\n" "$pkg" "$current_ver" "$available_ver"
-            updates_available=$((updates_available + 1))
-        else
-            printf "%-20s | %-25s | %-25s\n" "$pkg" "$current_ver" "$available_ver"
-        fi
-    done
-
-    echo "--------------------------------------------------------------------------------"
-    if [[ $updates_available -gt 0 ]]; then
-        echo "💡 $updates_available update(s) available. Run '$0 update' to install."
-    else
-        echo "✅ All extensions are up to date."
+        exit 0
     fi
-}
+fi
 
-cmd_install() {
-    local pkg_input="${1:-}"
-    [[ -z "$pkg_input" ]] && return 0
-
-    # Zjistíme čisté jméno balíčku (i z cesty k RPM souboru)
-    local pkg_name=$(basename "$pkg_input" | sed 's/\.rpm$//' | cut -d'-' -f1)
-
-    if is_blacklisted "$pkg_name"; then
-        echo "⛔ Blocked: Package '$pkg_name' is blacklisted because it conflicts with the core OS."
-        return 1
-    fi
-
-    echo -e "\n🔍 Checking $pkg_input..."
-
-    local current_file=$(ls "$EXT_DIR" 2>/dev/null | grep "^${pkg_name}-" | head -n1 || true)
-    local current_ver="none"
-    if [[ -n "$current_file" ]]; then
-        current_ver=$(echo "$current_file" | sed -E "s/^${pkg_name}-//; s/\.raw$//")
-    fi
-
-    local dry_run=$(rpm-ostree install --dry-run "$pkg_input" 2>/dev/null || true)
-    if [[ -z "$dry_run" || ! "$dry_run" == *"packages:"* ]]; then
-        echo "❌ Error: Could not resolve $pkg_input via rpm-ostree."
-        return 1
-    fi
-
-    # Vytáhneme verzi balíčku
-    local available_pkg_string=$(echo "$dry_run" | sed -n '/packages:/,$p' | grep -E "^  $pkg_name-[0-9]" | head -n1 | awk '{print $1}')
-    local available_ver=$(echo "$available_pkg_string" | sed -E "s/^${pkg_name}-//; s/\.[^.]+$//")
-    if [[ -z "$available_ver" || "$available_ver" == "unknown" ]]; then
-        echo "❌ Error: Nepodařilo se zjistit přesnou verzi balíčku. Zkuste zadat plný název (např. 'vivaldi-stable' místo '$pkg_name')."
-        return 1
-    fi
-
-    echo "   Installed: $current_ver"
-    echo "   Available: ${available_ver:-unknown}"
-
-    if [[ -n "$available_ver" && "$current_ver" == "$available_ver" ]]; then
-        echo "✅ $pkg_name is already up to date."
-        return 0
-    fi
-
-    local deps=$(echo "$dry_run" | sed -n '/packages:/,$p' | grep -E '^  [a-zA-Z0-9]' | awk '{print $1}' | sed -E 's/-[0-9].*//' | tr '\n' ' ')
-    [[ -z "$deps" ]] && deps="$pkg_name"
-
-    echo "📦 Waking up worker to bake version $available_ver..."
-    # Zde musíme zajistit cestu k jádru Pekaře
-    local core_script="sysext-creator-core"
-    if [[ -x "$(which $core_script 2>/dev/null)" ]]; then
-        cp "$(which $core_script)" "$WORKSPACE/core.sh"
-    else
-        cp ./sysext-creator-core.sh "$WORKSPACE/core.sh"
-    fi
-    chmod +x "$WORKSPACE/core.sh"
-
-    local target_raw="${pkg_name}-${available_ver}.raw"
-    local output=$(sudo podman exec -w /workspace "$CONTAINER_NAME" ./core.sh bake "$pkg_name" "$HOST_VERSION" "$target_raw" "$deps")
-    local status_line=$(echo "$output" | grep "^STATUS:" || true)
-
-    if [[ "$status_line" == *"STATUS:BAKED"* ]]; then
-        echo "🚚 Deploying $target_raw..."
-        sudo rm -f "$EXT_DIR/${pkg_name}-"*.raw
-        sudo mv "$WORKSPACE/$target_raw" "$EXT_DIR/"
-        sudo systemctl restart systemd-sysext.service
-        echo "✨ $pkg_name updated successfully."
-    else
-        echo "❌ Build failed. Output:"
-        echo "$output"
-    fi
-}
-
-cmd_update_all() {
-    echo "🔄 Refreshing repository metadata..."
-    rpm-ostree refresh-md >/dev/null
-
-    echo "🔄 Checking for updates in $EXT_DIR..."
-    local pkgs=$(ls "$EXT_DIR" 2>/dev/null | grep "\.raw$" | sed -E 's/-(v?[0-9]|fc[0-9]).*//' | sort -u)
-
-    for p in $pkgs; do
-        [[ -z "$p" || "$p" == sysext-creator* ]] && continue
-        cmd_install "$p"
-    done
-}
-
-# --- MAIN ---
-case "${1:-}" in
-    install)      cmd_install "${2:-}" ;;
-    update)       [[ -n "${2:-}" ]] && cmd_install "$2" || cmd_update_all ;;
-    update-check) cmd_update_check ;;
-    self-upgrade) cmd_self_upgrade ;;
-    version|--version|-v)
-        echo "💎 Sysext-Creator v${TOOL_VERSION} (Pure Podman Edition)"
-        ;;
-    rm|remove)
-        pkg="${2:-}"
-        [[ -z "$pkg" ]] && { echo "Usage: $0 rm <package>"; exit 1; }
-        if is_blacklisted "$pkg"; then echo "⛔ Blocked: Cannot remove core system packages."; exit 1; fi
-        echo "🗑 Removing $pkg..."
-        sudo rm -f "$EXT_DIR/${pkg}-"*.raw && sudo systemctl restart systemd-sysext.service
-        echo "✅ $pkg removed."
-        ;;
-    list)         ls -lh "$EXT_DIR" ;;
-    *)
-        echo "Usage: $0 {install|update|update-check|rm|list|self-upgrade|version} [package]"
-        exit 1
-        ;;
-esac
+# Route standard commands to the current validated container
+distrobox-enter -n "$CONTAINER_NAME" -- sysext-creator-core "$@"
