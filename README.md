@@ -1,44 +1,75 @@
-* 📦 Sysext-Creator (Resilient Edition)Sysext-Creator is a high-performance, event-driven tool for Fedora Atomic (Silverblue, Kinoite, Sway Atomic). It allows you to install traditional RPM packages as dynamic system extensions (systemd-sysext) with a 100% rootless daily workflow.
-* 🌟 Key Features
-* ⚡ Zero-Sudo Workflow if you install from repo: After initial setup, manage your apps without ever typing a password.
-* (Note: requires sudo to install local packages.)
-* 📡 Asynchronous IPC: Uses a request-reply model between a rootless Distrobox and a host daemon.
-* 🛡️ Self-Healing Container: Automatically detects missing mount points or OS version mismatches and repairs the environment.
-* 🗜️ EROFS Compression: Uses high-performance lz4hc compression for minimal disk footprint and maximum speed.
-* 🧹 Smart Cleanup: Interactive /etc configuration management and an "N-1" garbage collector for old containers.
-* 🏗️ Architecture: How it Works Sysext-Creator uses a Staging Area at /var/tmp/sysext-staging to facilitate communication between two distinct layers:
-* The Client (sysext-creator-core): Runs inside a rootless Distrobox. It downloads RPMs, extracts them, and creates an EROFS image.
-* The Watcher (systemd-deploy.path):* A native host unit that monitors the staging area for new files.
-* The Daemon (sysext-creator-deploy.sh): Triggered by the watcher, this script runs with host privileges to deploy the image and refresh system extensions.
-* 🚀 Installation
-* requires distrobox installed check `https://distrobox.it`
-* Clone the repository:
+# 📦 Sysext-Creator: The Atomic App Store
+
+**Sysext-Creator** is a native, container-backed package manager and GUI App Store designed specifically for **Fedora Atomic Desktops** (Kinoite, Silverblue, Sericea, etc.). 
+
+It allows you to install, update, and remove standard RPM packages as **Systemd System Extensions (`systemd-sysext`)** without layering them via `rpm-ostree` and without requiring system reboots.
+
+## ✨ Key Features
+
+* **Zero Host Contamination:** Packages are downloaded, resolved, and packed into EROFS `.raw` images entirely inside a throwaway Distrobox container.
+* **Rootless GUI Experience:** The PyQt6 graphical interface runs as a standard user. Privilege escalation is handled securely via a `systemd.path` daemon.
+* **Native KDE Dolphin Integration:** Right-click any downloaded `.rpm` file and select *"Install as System Extension"*.
+* **SELinux Ready:** Images are built with native host SELinux file contexts, ensuring 100% compatibility with Fedora's security policies.
+* **Auto-Updates:** Includes a background systemd user timer that keeps all your extensions up to date with desktop notifications.
+* **Bilingual:** GUI automatically adapts to English or Czech based on your system locale.
+
+## 🏗️ How It Works
+
+1. **Frontend (`sysext-gui` / CLI):** Runs as a standard user.
+2. **Backend Container:** A Fedora distrobox spins up, downloads RPMs, and packs them into a compressed EROFS `.raw` image. 
+3. **Deployment Daemon:** A privileged root daemon detects the new file, moves it to `/var/lib/extensions`, and triggers a `systemd-sysext refresh`.
+
+## 🚀 Quick Installation (Standalone RAW)
+
+Sysext-Creator is distributed as a system extension itself!
+
+1. Download the latest `sysext-creator.raw` from the Releases page.
+2. Move it to the extensions directory:
+```bash
+   sudo mkdir -p /var/lib/extensions
+   sudo cp sysext-creator.raw /var/lib/extensions/
+   sudo systemd-sysext refresh
+ ```
+3.Run the bootstrap setup (available directly from the image):
+
 ```Bash
-git clone https://github.com/yourusername/sysext-creator.git
+sysext-creator-setup
 ```
+## 🚀 Quick Installation (Standalone in $Home)
 ```Bash
+git clone https://github.com/namar66/sysext-creator.git
 cd sysext-creator
 chmod +x *.sh
-```
-* Run the setup script:
-```Bash
 ./sysext-creator-setup.sh
 ```
-* (Note: This is the only step that requires sudo to install the system daemon.)
-* Restart your terminal to enable bash completion.
-* 🛠️ Usage
-* Install an Application Fetches the package and its dependencies from the host's Fedora repositories.
-* `sysext-creator install htop`
-* List Installed Packages Queries the host daemon for accurate versioning of active extensions.
-* `sysext-creator list`
-* Remove an Application Unmounts the image and interactively asks to clean up configuration files in /etc.
-* `sysext-creator rm htop`
-* Update images
-* `sysext-creator updates`
-* Check-update
-* `sysext-creator check-update`
-* OS Upgrade (Major Version)After a major Fedora upgrade (e.g., F43 to F44), rebuild your extensions for the new base.
-* `sysext-creator upgrade-box`
-* 📝 Configuration & SafetyBlacklist: Critical system packages like glibc, kernel, and shadow-utils are blocked from installation to ensure system stability.
-* Throttling: The list command includes a 0.5s throttle to prevent saturating the Systemd event loop, ensuring reliable communication with the host daemon.
-* 📜 LicenseThis project is licensed under the GNU General Public License v2.
+💻 CLI Usage
+
+# Search for packages
+```Bash
+sysext-creator search <keyword>
+```
+# Install a package
+```Bash
+sysext-creator install <package_name>
+```
+# Update all extensions
+```Bash
+sysext-creator update
+```
+# Remove an extension
+```Bash
+sysext-creator rm <package_name>
+```
+🧹 Uninstallation
+# Stop services
+```Bash
+systemctl --user stop sysext-update.timer sysext-update.service
+sudo systemctl disable --now sysext-creator-deploy.path
+```
+# Remove the extension
+```Bash
+sudo rm /var/lib/extensions/sysext-creator.raw
+sudo systemd-sysext refresh
+```
+* 🤝 License
+* GPLv2
