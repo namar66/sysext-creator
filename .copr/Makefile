@@ -6,7 +6,7 @@ TARFILE := $(NAME)-$(VERSION).tar.gz
 .PHONY: srpm clean
 
 $(TARFILE):
-	git archive --prefix=$(NAME)-$(VERSION)/ --format=tar.gz HEAD > $(TARFILE)
+	tar --exclude-vcs --transform 's,^\./,$(NAME)-$(VERSION)/,' -czf $(TARFILE) .
 
 srpm: $(TARFILE)
 	rpmbuild -bs \
