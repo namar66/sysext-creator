@@ -10,7 +10,7 @@ $(TARFILE):
 
 srpm: $(TARFILE)
 	rpmbuild -bs \
-		--define "_sourcedir $(PWD)" \
+		--define "_sourcedir $(CURDIR)" \
 		--define "_srcrpmdir $(outdir)" \
 		$(SPEC)
 
