@@ -6,7 +6,7 @@ TARFILE := $(NAME)-$(VERSION).tar.gz
 .PHONY: srpm clean
 
 $(TARFILE):
-	tar --exclude-vcs --transform 's,^\./,$(NAME)-$(VERSION)/,' -czf $(TARFILE) .
+	tar --exclude-vcs --exclude=$(TARFILE) --transform 's,^\./,$(NAME)-$(VERSION)/,' -czf $(TARFILE) .
 
 srpm: $(TARFILE)
 	rpmbuild -bs \
