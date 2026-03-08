@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Sysext-Creator Wrapper (v1.4.3 - GC & Self-Healing Edition)
+# Sysext-Creator Wrapper (v1.5.0 - Universal & Self-Contained SELinux)
 ################################################################################
 
 set -euo pipefail
@@ -10,41 +10,50 @@ HOST_VERSION=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
 CONTAINER_NAME="sysext-box-fc${HOST_VERSION}"
 STAGING_DIR="/var/tmp/sysext-staging"
 
-# 🆕 GARBAGE COLLECTION: Smaže staré verze kontejnerů po upgradu OS
+# Chytrá autodetekce jádra (Local vs System-wide)
+if ! HOST_CORE_PATH=$(command -v sysext-creator-core 2>/dev/null); then
+    echo "❌ Error: sysext-creator-core not found in PATH."
+    exit 1
+fi
+
+if [[ "$HOST_CORE_PATH" == /usr/* ]]; then
+    # Běžíme z RPM balíčku nebo RAW obrazu -> kontejner musí jít přes můstek
+    CORE_EXEC="/run/host${HOST_CORE_PATH}"
+else
+    # Běžíme lokálně (např. ~/.local/bin) -> kontejner sdílí složku přímo
+    CORE_EXEC="$HOST_CORE_PATH"
+fi
+
 garbage_collect() {
-    # Najde všechny kontejnery začínající na sysext-box-fc, kromě toho aktuálního
     local old_containers=$(podman ps -a --format '{{.Names}}' | grep '^sysext-box-fc' | grep -v "^${CONTAINER_NAME}$" || true)
 
     if [[ -n "$old_containers" ]]; then
-        echo "🧹 Nalezena stará prostředí z předchozích verzí Fedory. Zahajuji úklid..."
+        echo "🧹 Found legacy containers from previous Fedora versions. Starting cleanup..."
         for old_box in $old_containers; do
-            echo "=> Odstraňuji starý kontejner: $old_box"
+            echo "=> Removing old container: $old_box"
             distrobox rm -Y "$old_box" >/dev/null 2>&1 || podman rm -f "$old_box" >/dev/null 2>&1
         done
-        echo "✅ Garbage Collection dokončena."
+        echo "✅ Garbage Collection completed."
     fi
 }
 
-# 🆕 KONTROLA MOUNTŮ A EXISTENCE: Sestaví nebo opraví kontejner
 check_container() {
     local recreate=0
 
     if ! podman ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-        echo "⚠️ Kontejner $CONTAINER_NAME neexistuje."
+        echo "⚠️ Container $CONTAINER_NAME does not exist."
         recreate=1
     else
-        # Zkontroluje, zda jsou oba klíčové adresáře skutečně namapované uvnitř
         local mounts=$(podman inspect "$CONTAINER_NAME" --format '{{.Mounts}}' 2>/dev/null || true)
         if [[ "$mounts" != *"$STAGING_DIR"* ]] || [[ "$mounts" != *"/etc/yum.repos.d"* ]]; then
-            echo "⚠️ Kontejner $CONTAINER_NAME má chybějící mounty (pravděpodobně byl vytvořen ručně). Bude přebudován."
+            echo "⚠️ Container $CONTAINER_NAME is missing required mounts. Rebuilding..."
             distrobox rm -Y "$CONTAINER_NAME" >/dev/null 2>&1 || podman rm -f "$CONTAINER_NAME" >/dev/null 2>&1
             recreate=1
         fi
     fi
 
-    # Pokud kontejner chybí nebo měl špatné mounty, vytvoříme ho znovu správně
     if [[ $recreate -eq 1 ]]; then
-        echo "=> Zahajuji sestavení kontejneru $CONTAINER_NAME..."
+        echo "=> Starting build of container $CONTAINER_NAME..."
         distrobox create \
             --name "$CONTAINER_NAME" \
             --image "registry.fedoraproject.org/fedora-toolbox:${HOST_VERSION}" \
@@ -52,19 +61,17 @@ check_container() {
             --volume "/etc/yum.repos.d:/etc/yum.repos.d:ro" \
             -Y
 
-        echo "=> Instaluji nezbytné závislosti uvnitř kontejneru..."
-        distrobox enter "$CONTAINER_NAME" -- sudo dnf install -y erofs-utils cpio dnf-utils
-        echo "✅ Kontejner úspěšně obnoven a připraven!"
+        echo "=> Installing required dependencies inside the container..."
+        # ZDE PŘIDÁNA INSTALACE selinux-policy-targeted
+        distrobox enter "$CONTAINER_NAME" -- sudo dnf install -y erofs-utils cpio dnf-utils selinux-policy-targeted
+        echo "✅ Container successfully restored and ready!"
     fi
 }
 
 main() {
-    [[ $# -lt 1 ]] && { echo "Použití: sysext-creator install|update|rm|list [balíček/cesta]"; exit 1; }
+    [[ $# -lt 1 ]] && { echo "Usage: sysext-creator install|install-local|update|check-update|rm|list|search [package/path]"; exit 1; }
 
-    # 1. Uklidíme staré verze (např. po upgardu OS)
     garbage_collect
-
-    # 2. Ověříme integritu aktuálního kontejneru
     check_container
 
     local cmd="$1"
@@ -74,17 +81,17 @@ main() {
             local target="$2"
             if [[ -f "$target" && "$target" == *.rpm ]]; then
                 local abs_path=$(realpath "$target")
-                echo "=> Detekován lokální balíček, spouštím offline instalaci..."
-                distrobox enter "$CONTAINER_NAME" -- sysext-creator-core install-local "$abs_path"
+                echo "=> Local package detected, starting offline installation..."
+                distrobox enter "$CONTAINER_NAME" -- "$CORE_EXEC" install-local "$abs_path"
             else
-                distrobox enter "$CONTAINER_NAME" -- sysext-creator-core install "$target"
+                distrobox enter "$CONTAINER_NAME" -- "$CORE_EXEC" install "$target"
             fi
             ;;
-        update|check-update|rm|list)
-            distrobox enter "$CONTAINER_NAME" -- sysext-creator-core "$@"
+        rm|update|check-update|list|search)
+            distrobox enter "$CONTAINER_NAME" -- "$CORE_EXEC" "$@"
             ;;
         *)
-            echo "❌ Neznámý příkaz: $cmd"
+            echo "❌ Unknown command: $cmd"
             exit 1
             ;;
     esac
