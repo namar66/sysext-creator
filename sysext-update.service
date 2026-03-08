@@ -1,0 +1,9 @@
+[Unit]
+Description=Automatická aktualizace systémových rozšíření Sysext
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/bin/notify-send "Sysext-Creator" "Zahajuji automatickou kontrolu a aktualizaci rozšíření..." --icon sysext-creator-icon --app-name "Sysext-Creator"
+ExecStart=sysext-creator update
+ExecStartPost=/usr/bin/notify-send "Sysext-Creator" "Automatická aktualizace byla úspěšně dokončena." --icon sysext-creator-icon --app-name "Sysext-Creator"

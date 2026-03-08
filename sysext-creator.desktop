@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Sysext-Creator
+Comment=Správa systémových rozšíření pro atomickou Fedoru
+Exec=sysext-gui
+Icon=sysext-creator-icon
+Terminal=false
+Type=Application
+Categories=System;Settings;
+Keywords=fedora;atomic;sysext;extension;dnf;
+StartupNotify=true
+X-KDE-StartupNotify=true

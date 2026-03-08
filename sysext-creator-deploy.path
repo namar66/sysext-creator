@@ -1,0 +1,10 @@
+[Unit]
+Description=Monitor sysext staging directory
+
+[Path]
+PathChanged=/var/tmp/sysext-staging
+MakeDirectory=yes
+DirectoryMode=0777
+
+[Install]
+WantedBy=multi-user.target

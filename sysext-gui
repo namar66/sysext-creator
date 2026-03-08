@@ -1,0 +1,385 @@
+#!/usr/bin/python3
+
+import sys
+import os
+import subprocess
+import time
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QTabWidget, QTableWidget, QTableWidgetItem,
+                             QPushButton, QLineEdit, QLabel, QHeaderView, QMessageBox)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QIcon
+
+# ======================================================================
+# MULTILANGUAGE SUPPORT (I18N)
+# ======================================================================
+# Detekce jazyka systému (pokud není 'cs', použije se automaticky 'en')
+sys_lang = os.environ.get("LANG", "en_US").split('_')[0]
+CURRENT_LANG = sys_lang if sys_lang in ["cs", "en"] else "en"
+
+I18N = {
+    "en": {
+        "app_title": "Sysext-Creator: App Store",
+        "header_title": "📦 System Extensions Manager (Kinoite Edition)",
+        "tab_installed": "✅ Installed",
+        "tab_explore": "🌐 Explore (Repository)",
+        "col_pkg": "Package",
+        "col_ver": "Version",
+        "col_status": "Status",
+        "col_action": "Action",
+        "col_avail_pkg": "Available Package",
+        "col_summary": "Summary",
+        "btn_load_ver": "🏷️ Load Versions",
+        "btn_update_all": "🔄 Update All",
+        "btn_search": "🔍 Search",
+        "btn_remove": "🗑️ Remove",
+        "btn_install": "➕ Install",
+        "search_placeholder": "Search for a package (e.g., kate, htop, mc)...",
+        "status_installed": "Installed",
+        "no_summary": "No summary available",
+        "state_loading": "⏳ Loading...",
+        "state_installing": "⏳ Installing...",
+        "state_removing": "⏳ Removing...",
+        "state_updating": "⏳ Updating...",
+        "dialog_confirm_title": "Confirmation",
+        "dialog_confirm_rm": "Do you want to remove package '{}' and clean its configuration?",
+        "dialog_error_title": "Error",
+        "dialog_error_msg": "Error during {}:\n{}",
+        "msg_pkg_success": "Package {} was successfully processed.",
+        "msg_all_success": "All packages were updated.",
+        "op_install": "Installation",
+        "op_rm": "Removal",
+        "op_update": "Update",
+        "op_completed": "✅ {} Completed"
+    },
+    "cs": {
+        "app_title": "Sysext-Creator: App Store",
+        "header_title": "📦 Správce systémových rozšíření (Kinoite Edition)",
+        "tab_installed": "✅ Nainstalováno",
+        "tab_explore": "🌐 Prozkoumat (Repozitář)",
+        "col_pkg": "Balíček",
+        "col_ver": "Verze",
+        "col_status": "Stav",
+        "col_action": "Akce",
+        "col_avail_pkg": "Dostupný balíček",
+        "col_summary": "Popis",
+        "btn_load_ver": "🏷️ Načíst verze",
+        "btn_update_all": "🔄 Aktualizovat vše",
+        "btn_search": "🔍 Hledat",
+        "btn_remove": "🗑️ Odstranit",
+        "btn_install": "➕ Instalovat",
+        "search_placeholder": "Hledat balíček (např. kate, htop, mc)...",
+        "status_installed": "Nainstalováno",
+        "no_summary": "Bez popisu",
+        "state_loading": "⏳ Načítám...",
+        "state_installing": "⏳ Instaluje se...",
+        "state_removing": "⏳ Odstraňuje se...",
+        "state_updating": "⏳ Probíhá aktualizace...",
+        "dialog_confirm_title": "Potvrzení",
+        "dialog_confirm_rm": "Chcete odstranit balíček '{}' a vyčistit jeho konfiguraci?",
+        "dialog_error_title": "Chyba",
+        "dialog_error_msg": "Chyba při operaci {}:\n{}",
+        "msg_pkg_success": "Balíček {} byl úspěšně zpracován.",
+        "msg_all_success": "Všechny balíčky byly aktualizovány.",
+        "op_install": "Instalace",
+        "op_rm": "Odstranění",
+        "op_update": "Aktualizace",
+        "op_completed": "✅ {} dokončena"
+    }
+}
+
+def tr(key, *args):
+    """Pomocná funkce pro překlad. Umožňuje i formátování přes *args."""
+    text = I18N[CURRENT_LANG].get(key, key)
+    if args:
+        return text.format(*args)
+    return text
+
+# ======================================================================
+# 1. THREAD: REPOSITORY SEARCH (DNF Search)
+# ======================================================================
+class SearchWorker(QThread):
+    result_found = pyqtSignal(str, str)
+    finished = pyqtSignal()
+
+    def __init__(self, keyword):
+        super().__init__()
+        self.keyword = keyword
+
+    def run(self):
+        try:
+            process = subprocess.run(
+                ["sysext-creator", "search", self.keyword],
+                capture_output=True, text=True
+            )
+            for line in process.stdout.splitlines():
+                line = line.strip()
+                # Backend může být EN (PACKAGE) nebo CS (BALÍČEK), ignorujeme obojí
+                if not line or line.startswith("=>") or line.startswith("PACKAGE") or line.startswith("BALÍČEK") or line.startswith("----"):
+                    continue
+                parts = line.split(maxsplit=1)
+                if parts:
+                    name = parts[0]
+                    desc = parts[1] if len(parts) > 1 else tr("no_summary")
+                    self.result_found.emit(name, desc)
+        except Exception as e:
+            print(f"[ERROR Search] {e}")
+        self.finished.emit()
+
+# ======================================================================
+# 2. THREAD: ACTIONS (INSTALL, RM, UPDATE) + AUTO-CONFIRM
+# ======================================================================
+class ActionWorker(QThread):
+    finished = pyqtSignal(bool, str, str, str)
+
+    def __init__(self, action, target=None):
+        super().__init__()
+        self.action = action
+        self.target = target
+
+    def run(self):
+        cmd = ["sysext-creator", self.action]
+        if self.target:
+            cmd.append(self.target)
+
+        if self.action == "rm":
+            cmd.append("yes")
+
+        try:
+            process = subprocess.run(cmd, capture_output=True, text=True)
+            if process.returncode == 0:
+                if self.target:
+                    ext_file = f"/var/lib/extensions/{self.target}.raw"
+                    if self.action == "install":
+                        for _ in range(20):
+                            if os.path.exists(ext_file): break
+                            time.sleep(0.5)
+                    elif self.action == "rm":
+                        for _ in range(20):
+                            if not os.path.exists(ext_file): break
+                            time.sleep(0.5)
+                elif self.action == "update":
+                    time.sleep(2.5)
+
+                self.finished.emit(True, process.stdout, self.action, self.target or "")
+            else:
+                self.finished.emit(False, process.stderr or process.stdout, self.action, self.target or "")
+        except Exception as e:
+            self.finished.emit(False, str(e), self.action, self.target or "")
+
+# ======================================================================
+# 3. THREAD: VERSION LOADING
+# ======================================================================
+class VersionWorker(QThread):
+    version_found = pyqtSignal(str, str)
+    finished = pyqtSignal()
+
+    def run(self):
+        try:
+            process = subprocess.run(["sysext-creator", "list"], capture_output=True, text=True)
+            for line in process.stdout.splitlines():
+                line = line.strip()
+                if "📦" in line and "(Version: " in line or "(Verze: " in line:
+                    # Podporujeme parsování pro český i anglický backend
+                    separator = " (Version: " if " (Version: " in line else " (Verze: "
+                    parts = line.split("📦 ")[1].split(separator)
+                    if len(parts) == 2:
+                        name = parts[0].strip()
+                        version = parts[1].replace(")", "").strip()
+                        self.version_found.emit(name, version)
+        except Exception as e:
+            print(f"[ERROR Version] {e}")
+        self.finished.emit()
+
+# ======================================================================
+# MAIN MANAGER WINDOW
+# ======================================================================
+class SysextManager(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(tr("app_title"))
+        self.resize(850, 600)
+        self.active_workers = []
+
+        self.setWindowIcon(QIcon.fromTheme("sysext-creator-icon"))
+
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+
+        header = QLabel(tr("header_title"))
+        header.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 10px;")
+        main_layout.addWidget(header)
+
+        self.tabs = QTabWidget()
+        main_layout.addWidget(self.tabs)
+
+        self.setup_installed_tab()
+        self.setup_explore_tab()
+        self.load_installed_packages()
+
+    def setup_installed_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        self.installed_table = QTableWidget(0, 4)
+        self.installed_table.setHorizontalHeaderLabels([tr("col_pkg"), tr("col_ver"), tr("col_status"), tr("col_action")])
+        self.installed_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.installed_table.setColumnWidth(1, 150)
+        layout.addWidget(self.installed_table)
+
+        btn_layout = QHBoxLayout()
+        self.version_btn = QPushButton(tr("btn_load_ver"))
+        self.version_btn.clicked.connect(self.load_versions)
+        self.refresh_btn = QPushButton(tr("btn_update_all"))
+        self.refresh_btn.clicked.connect(self.update_all)
+
+        btn_layout.addWidget(self.version_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(self.refresh_btn)
+        layout.addLayout(btn_layout)
+        self.tabs.addTab(tab, tr("tab_installed"))
+
+    def setup_explore_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        search_layout = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText(tr("search_placeholder"))
+        self.search_input.returnPressed.connect(self.start_search)
+
+        self.search_btn = QPushButton(tr("btn_search"))
+        self.search_btn.clicked.connect(self.start_search)
+
+        search_layout.addWidget(self.search_input)
+        search_layout.addWidget(self.search_btn)
+        layout.addLayout(search_layout)
+
+        self.search_table = QTableWidget(0, 3)
+        self.search_table.setHorizontalHeaderLabels([tr("col_avail_pkg"), tr("col_summary"), tr("col_action")])
+        self.search_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.search_table)
+        self.tabs.addTab(tab, tr("tab_explore"))
+
+    def send_notification(self, title, message):
+        try:
+            subprocess.Popen(["notify-send", title, message, "--icon", "sysext-creator-icon", "--app-name", "Sysext-Creator"])
+        except Exception as e:
+            print(f"[DEBUG] Notification failed: {e}")
+
+    def load_installed_packages(self):
+        self.installed_table.setRowCount(0)
+        ext_dir = "/var/lib/extensions"
+        if not os.path.exists(ext_dir): return
+
+        packages = [f.replace('.raw', '') for f in os.listdir(ext_dir) if f.endswith('.raw')]
+        for pkg in sorted(packages):
+            row = self.installed_table.rowCount()
+            self.installed_table.insertRow(row)
+            self.installed_table.setItem(row, 0, QTableWidgetItem(pkg))
+            self.installed_table.setItem(row, 1, QTableWidgetItem("---"))
+
+            status_item = QTableWidgetItem(tr("status_installed"))
+            status_item.setForeground(Qt.GlobalColor.green)
+            self.installed_table.setItem(row, 2, status_item)
+
+            rm_btn = QPushButton(tr("btn_remove"))
+            rm_btn.clicked.connect(lambda checked, p=pkg, b=rm_btn: self.remove_package(p, b))
+            self.installed_table.setCellWidget(row, 3, rm_btn)
+
+    def load_versions(self):
+        self.version_btn.setText(tr("state_loading"))
+        self.version_btn.setEnabled(False)
+        self.v_worker = VersionWorker()
+        self.v_worker.version_found.connect(self.update_version_in_table)
+        self.v_worker.finished.connect(lambda: self.version_btn.setText(tr("btn_load_ver")) or self.version_btn.setEnabled(True))
+        self.v_worker.start()
+
+    def update_version_in_table(self, name, version):
+        for row in range(self.installed_table.rowCount()):
+            item = self.installed_table.item(row, 0)
+            if item and item.text() == name:
+                v_item = QTableWidgetItem(version)
+                v_item.setForeground(Qt.GlobalColor.darkBlue if version not in ["unknown", "neznámá"] else Qt.GlobalColor.red)
+                self.installed_table.setItem(row, 1, v_item)
+                break
+
+    def install_package(self, pkg_name, btn):
+        btn.setText(tr("state_installing"))
+        btn.setEnabled(False)
+        self.run_action_worker("install", pkg_name)
+
+    def remove_package(self, pkg_name, btn):
+        if QMessageBox.question(self, tr("dialog_confirm_title"), tr("dialog_confirm_rm", pkg_name),
+                               QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+            btn.setText(tr("state_removing"))
+            btn.setEnabled(False)
+            self.run_action_worker("rm", pkg_name)
+
+    def update_all(self):
+        self.refresh_btn.setText(tr("state_updating"))
+        self.refresh_btn.setEnabled(False)
+        self.run_action_worker("update", None)
+
+    def run_action_worker(self, action, target):
+        worker = ActionWorker(action, target)
+        worker.finished.connect(self.on_action_finished)
+        self.active_workers.append(worker)
+        worker.start()
+
+    def on_action_finished(self, success, message, action, target):
+        self.load_installed_packages()
+        self.refresh_btn.setText(tr("btn_update_all"))
+        self.refresh_btn.setEnabled(True)
+
+        act_names = {"install": tr("op_install"), "rm": tr("op_rm"), "update": tr("op_update")}
+        title = act_names.get(action, "Operation")
+
+        if success:
+            msg = tr("msg_pkg_success", target) if target else tr("msg_all_success")
+            self.send_notification(tr("op_completed", title), msg)
+            if action == "install": self.mark_as_installed_in_search(target)
+        else:
+            QMessageBox.critical(self, tr("dialog_error_title"), tr("dialog_error_msg", title.lower(), message))
+
+        self.active_workers = [w for w in self.active_workers if w.isRunning()]
+
+    def mark_as_installed_in_search(self, name):
+        for row in range(self.search_table.rowCount()):
+            item = self.search_table.item(row, 0)
+            if item and item.text() == name:
+                info = QTableWidgetItem(tr("status_installed"))
+                info.setForeground(Qt.GlobalColor.green)
+                self.search_table.setItem(row, 2, info)
+
+    def start_search(self):
+        keyword = self.search_input.text().strip()
+        if not keyword: return
+        self.search_btn.setEnabled(False)
+        self.search_table.setRowCount(0)
+        self.worker = SearchWorker(keyword)
+        self.worker.result_found.connect(self.add_search_result)
+        self.worker.finished.connect(lambda: self.search_btn.setEnabled(True))
+        self.worker.start()
+
+    def add_search_result(self, name, desc):
+        row = self.search_table.rowCount()
+        self.search_table.insertRow(row)
+        self.search_table.setItem(row, 0, QTableWidgetItem(name))
+        self.search_table.setItem(row, 1, QTableWidgetItem(desc))
+        if os.path.exists(f"/var/lib/extensions/{name}.raw"):
+            info = QTableWidgetItem(tr("status_installed"))
+            info.setForeground(Qt.GlobalColor.green)
+            self.search_table.setItem(row, 2, info)
+        else:
+            btn = QPushButton(tr("btn_install"))
+            btn.clicked.connect(lambda ch, p=name, b=btn: self.install_package(p, b))
+            self.search_table.setCellWidget(row, 2, btn)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    app.setDesktopFileName("sysext-creator")
+    window = SysextManager()
+    window.show()
+    sys.exit(app.exec())

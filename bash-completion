@@ -1,0 +1,26 @@
+_sysext_creator_completions() {
+    local cur prev cmds
+    COMPREPLY=()
+    cur="${COMP_WORDS[COMP_CWORD]}"
+    prev="${COMP_WORDS[COMP_CWORD-1]}"
+    cmds="install update check-update rm list search"
+
+    if [[ ${COMP_CWORD} -eq 1 ]]; then
+        COMPREPLY=( $(compgen -W "${cmds}" -- "${cur}") )
+        return 0
+    fi
+
+    case "${prev}" in
+        install|search)
+            compopt -o default
+            COMPREPLY=()
+            ;;
+        rm)
+            local installed=$(ls /var/lib/extensions/*.raw 2>/dev/null | xargs -n1 basename -s .raw 2>/dev/null || true)
+            COMPREPLY=( $(compgen -W "${installed}" -- "${cur}") )
+            ;;
+        *)
+            ;;
+    esac
+}
+complete -F _sysext_creator_completions sysext-creator

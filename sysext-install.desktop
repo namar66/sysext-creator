@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=application/x-rpm;
+Actions=installAsSysext;
+X-KDE-Priority=TopLevel
+Icon=package-x-generic
+
+[Desktop Action installAsSysext]
+Name=Instalovat jako System Extension
+Icon=system-software-install
+Exec=konsole -e bash -c "sysext-creator install '%f'; echo -e '\n✨ Hotovo! Okno se zavře za 3 sekundy...'; sleep 3"

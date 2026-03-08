@@ -1,0 +1,8 @@
+[Unit]
+Description=Deploy staged systemd-sysext images
+After=systemd-sysext.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/sysext-creator/sysext-creator-deploy
