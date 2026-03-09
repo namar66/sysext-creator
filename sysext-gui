@@ -4,6 +4,8 @@ import sys
 import os
 import subprocess
 import time
+import glob
+import re
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QTabWidget, QTableWidget, QTableWidgetItem,
                              QPushButton, QLineEdit, QLabel, QHeaderView, QMessageBox)
@@ -13,7 +15,6 @@ from PyQt6.QtGui import QIcon
 # ======================================================================
 # MULTILANGUAGE SUPPORT (I18N)
 # ======================================================================
-# Detekce jazyka systému (pokud není 'cs', použije se automaticky 'en')
 sys_lang = os.environ.get("LANG", "en_US").split('_')[0]
 CURRENT_LANG = sys_lang if sys_lang in ["cs", "en"] else "en"
 
@@ -89,7 +90,6 @@ I18N = {
 }
 
 def tr(key, *args):
-    """Pomocná funkce pro překlad. Umožňuje i formátování přes *args."""
     text = I18N[CURRENT_LANG].get(key, key)
     if args:
         return text.format(*args)
@@ -114,7 +114,6 @@ class SearchWorker(QThread):
             )
             for line in process.stdout.splitlines():
                 line = line.strip()
-                # Backend může být EN (PACKAGE) nebo CS (BALÍČEK), ignorujeme obojí
                 if not line or line.startswith("=>") or line.startswith("PACKAGE") or line.startswith("BALÍČEK") or line.startswith("----"):
                     continue
                 parts = line.split(maxsplit=1)
@@ -149,14 +148,16 @@ class ActionWorker(QThread):
             process = subprocess.run(cmd, capture_output=True, text=True)
             if process.returncode == 0:
                 if self.target:
-                    ext_file = f"/var/lib/extensions/{self.target}.raw"
+                    ext_pattern = f"/var/lib/extensions/{self.target}-fc*.raw"
+                    old_pattern = f"/var/lib/extensions/{self.target}.raw"
+
                     if self.action == "install":
                         for _ in range(20):
-                            if os.path.exists(ext_file): break
+                            if glob.glob(ext_pattern) or glob.glob(old_pattern): break
                             time.sleep(0.5)
                     elif self.action == "rm":
                         for _ in range(20):
-                            if not os.path.exists(ext_file): break
+                            if not glob.glob(ext_pattern) and not glob.glob(old_pattern): break
                             time.sleep(0.5)
                 elif self.action == "update":
                     time.sleep(2.5)
@@ -179,8 +180,7 @@ class VersionWorker(QThread):
             process = subprocess.run(["sysext-creator", "list"], capture_output=True, text=True)
             for line in process.stdout.splitlines():
                 line = line.strip()
-                if "📦" in line and "(Version: " in line or "(Verze: " in line:
-                    # Podporujeme parsování pro český i anglický backend
+                if "📦" in line and ("(Version: " in line or "(Verze: " in line):
                     separator = " (Version: " if " (Version: " in line else " (Verze: "
                     parts = line.split("📦 ")[1].split(separator)
                     if len(parts) == 2:
@@ -273,7 +273,12 @@ class SysextManager(QMainWindow):
         ext_dir = "/var/lib/extensions"
         if not os.path.exists(ext_dir): return
 
-        packages = [f.replace('.raw', '') for f in os.listdir(ext_dir) if f.endswith('.raw')]
+        packages = set()
+        for f in os.listdir(ext_dir):
+            if f.endswith('.raw'):
+                clean_name = re.sub(r'-fc\d+$', '', f[:-4])
+                packages.add(clean_name)
+
         for pkg in sorted(packages):
             row = self.installed_table.rowCount()
             self.installed_table.insertRow(row)
@@ -368,7 +373,8 @@ class SysextManager(QMainWindow):
         self.search_table.insertRow(row)
         self.search_table.setItem(row, 0, QTableWidgetItem(name))
         self.search_table.setItem(row, 1, QTableWidgetItem(desc))
-        if os.path.exists(f"/var/lib/extensions/{name}.raw"):
+
+        if glob.glob(f"/var/lib/extensions/{name}-fc*.raw") or glob.glob(f"/var/lib/extensions/{name}.raw"):
             info = QTableWidgetItem(tr("status_installed"))
             info.setForeground(Qt.GlobalColor.green)
             self.search_table.setItem(row, 2, info)
