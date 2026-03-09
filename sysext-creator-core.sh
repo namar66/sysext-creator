@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Sysext-Creator-Core (v1.6.0 - EN Edition)
+# Sysext-Creator-Core (v1.6.1 - EN Edition)
 # Runs exclusively inside the distrobox container.
 ################################################################################
 
