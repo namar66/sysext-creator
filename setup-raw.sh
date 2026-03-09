@@ -96,7 +96,7 @@ fi
 podman run --rm --privileged \
     -v /var/lib/extensions:/ext_out \
     "registry.fedoraproject.org/fedora:${HOST_VER}" \
-    /bin/bash -c "
+    /bin/bash -c " \
         dnf install -y dnf-plugins-core erofs-utils cpio selinux-policy-targeted && \
         dnf copr enable -y nadmartin/sysext-creator && \
         dnf install -y --downloadonly --downloaddir=/tmp/pkg $PKG && \
