@@ -76,57 +76,59 @@ echo "=> Instaluji Auto-Healer (záchranný modul pro přežití upgradu OS)..."
 sudo tee /usr/local/bin/sysext-creator-healer > /dev/null << 'EOF'
 #!/bin/bash
 HOST_VER=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
-RAW_FILE="/var/lib/extensions/sysext-creator-fc${HOST_VER}.raw"
 
-if [ -f "$RAW_FILE" ]; then
-    exit 0
-fi
-
-echo "🚨 Sysext-Creator pro Fedoru $HOST_VER nenalezen! Spouštím auto-heal..."
-
-# Úklid starých verzí
-rm -f /var/lib/extensions/sysext-creator.raw 2>/dev/null || true
-find /var/lib/extensions/ -maxdepth 1 -name "sysext-creator-fc*.raw" -not -name "sysext-creator-fc${HOST_VER}.raw" -delete 2>/dev/null || true
-
+# Seznam balíčků
 PKG="sysext-creator"
 if grep -iq "kinoite" /etc/os-release || [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]]; then
-    PKG="sysext-creator-kinoite"
+    PKG="sysext-creator-kinoite sysext-creator iio-sensor-proxy python-pyqt6-rpm-macros python3-pyqt6 python3-pyqt6-base python3-pyqt6-sip qt6-qtremoteobjects qt6-qtsensors qt6-qttools-libs-designer qt6-qttools-libs-help"
 fi
 
 podman run --rm --privileged \
     -v /var/lib/extensions:/ext_out \
     "registry.fedoraproject.org/fedora:${HOST_VER}" \
-    /bin/bash -c " \
-        dnf install -y dnf-plugins-core erofs-utils cpio selinux-policy-targeted && \
+    /bin/bash -x -c "
+        mkdir -p /tmp/pkg /tmp/rootfs/usr/lib/extension-release.d && \
+        dnf install -y erofs-utils cpio selinux-policy-targeted --setopt=install_weak_deps=False && \
         dnf copr enable -y nadmartin/sysext-creator && \
-        dnf install -y --downloadonly --downloaddir=/tmp/pkg $PKG && \
-        mkdir -p /tmp/rootfs/usr/lib/extension-release.d && \
-        echo \"ID=fedora\" > /tmp/rootfs/usr/lib/extension-release.d/extension-release.sysext-creator && \
-        echo \"VERSION_ID=\${HOST_VER}\" >> /tmp/rootfs/usr/lib/extension-release.d/extension-release.sysext-creator && \
-        rpm2cpio /tmp/pkg/*.rpm | cpio -idmv -D /tmp/rootfs 2>/dev/null && \
-        mkfs.erofs -zlz4hc --force-uid=0 --force-gid=0 --file-contexts=/etc/selinux/targeted/contexts/files/file_contexts /ext_out/sysext-creator-fc\${HOST_VER}.raw /tmp/rootfs >/dev/null
+        dnf download --destdir=/tmp/pkg $PKG distrobox && \
+        echo 'ID=fedora' > /tmp/rootfs/usr/lib/extension-release.d/extension-release.sysext-creator-fc${HOST_VER} && \
+        echo 'VERSION_ID=${HOST_VER}' >> /tmp/rootfs/usr/lib/extension-release.d/extension-release.sysext-creator-fc${HOST_VER} && \
+        cd /tmp/rootfs && \
+        for f in /tmp/pkg/*.rpm; do
+            rpm2cpio \$f | cpio -idmv
+        done && \
+        mkfs.erofs -zlz4hc --force-uid=0 --force-gid=0 \
+            --file-contexts=/etc/selinux/targeted/contexts/files/file_contexts \
+            /ext_out/sysext-creator-fc${HOST_VER}.raw /tmp/rootfs
     "
-
 systemd-sysext refresh
+
 EOF
 
 sudo chmod +x /usr/local/bin/sysext-creator-healer
 
 sudo tee /etc/systemd/system/sysext-creator-heal.service > /dev/null << 'EOF'
 [Unit]
-Description=Sysext-Creator Auto-Healer (OS Upgrade Survival)
-After=network-online.target podman.socket
+Description=Sysext-Creator Auto-Healer (Background)
+After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=oneshot
+Type=simple
 ExecStart=/usr/local/bin/sysext-creator-healer
-RemainAfterExit=yes
+EOF
+sudo tee /etc/systemd/system/sysext-creator-heal.timer > /dev/null << 'EOF'
+[Unit]
+Description=Spouští Healer 2 minuty po startu systému
+
+[Timer]
+# Počká 2 minuty po naběhnutí systému
+OnBootSec=2min
+Unit=sysext-creator-heal.service
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=timers.target
 EOF
-
 sudo systemctl daemon-reload
 sudo systemctl enable --now sysext-creator-heal.service
 
