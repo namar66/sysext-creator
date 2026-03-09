@@ -1,5 +1,5 @@
 Name:           sysext-creator
-Version:        1.6.0
+Version:        1.6.1
 Release:        1%{?dist}
 Summary:        Správce systémových rozšíření pro Fedoru Kinoite/Silverblue
 
@@ -100,6 +100,8 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/*.desktop
 %{_datadir}/kio/servicemenus/sysext-install.desktop
 
 %changelog
+* Mon Mar 09 2026 Martin Naď <namar66@gmail.com> - 1.6.1-1
+- fix bugs
 * Mon Mar 09 2026 Martin Naď <namar66@gmail.com> - 1.6.0-1
 - Added Auto-Healer: automatic recovery of the tool after Fedora upgrade.
 - Image versioning: full compatibility with systemd-sysext (-fcXX.raw format).
