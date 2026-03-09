@@ -211,7 +211,12 @@ cmd_remove() {
     local pkg="$1"
     local force_all="${2:-false}"
 
-    # Přidaná pojistka: Ověření, zda balíček vůbec existuje
+    # 1. INSURANCE: Protection against erasure of the tool itself
+    if [[ "$pkg" == "sysext-creator" || "$pkg" == "sysext-creator-kinoite" ]]; then
+        die "This tool cannot be removed with the regular rm command.\nFor complete and safe removal, use the installation script with the 'uninstall' argument (e.g. sysext-creator-setup uninstall)."
+    fi
+
+    # 2. INSURANCE: Verifying whether a package even exists
     local check_exists=$(distrobox-host-exec find "$EXT_DIR" -maxdepth 1 \( -name "${pkg}-fc*.raw" -o -name "${pkg}.raw" \) 2>/dev/null)
     if [[ -z "$check_exists" ]]; then
         status "Package '$pkg' is not installed. Nothing to do."
