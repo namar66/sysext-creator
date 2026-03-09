@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Sysext-Creator-Core (v1.5.0 - EN Edition)
+# Sysext-Creator-Core (v1.6.0 - EN Edition)
 # Runs exclusively inside the distrobox container.
 ################################################################################
 
@@ -13,7 +13,7 @@ readonly STATE_DIR="$HOME/.local/state/sysext-creator"
 readonly TRACKER_FILE="${STATE_DIR}/etc_tracker.txt"
 
 readonly REQUIRED_CMDS=("mkfs.erofs" "cpio" "rpm2cpio" "repoquery")
-readonly SPECIAL_PACKAGES=("vivaldi-stable")
+readonly SPECIAL_PACKAGES=("sysext-creator")
 readonly BLACKLIST=("glibc" "systemd" "dnf" "microdnf" "rpm-ostree" "pam" "kernel" "grub2" "dracut" "passwd" "shadow-utils" "sudo" "tar")
 
 WORKDIR=""
@@ -80,6 +80,20 @@ get_host_packages() {
 
 cmd_install() {
     local package="$1" host_version="$2" mode="${3:-install}"
+
+    # Logika pro speciální balíčky (Sysext-Creator)
+    if [[ " ${SPECIAL_PACKAGES[*]} " =~ " ${package} " ]]; then
+        if [[ "$package" == "sysext-creator" ]]; then
+            # Detekce hostitele: Kinoite/KDE vs ostatní
+            if grep -iq "kinoite" /etc/os-release || [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]]; then
+                info "Special package detected: Switching to sysext-creator-kinoite (GUI)"
+                package="sysext-creator-kinoite"
+            else
+                info "Special package detected: Keeping sysext-creator (Core)"
+            fi
+        fi
+    fi
+
     [[ "$package" =~ ^($(IFS='|'; echo "${BLACKLIST[*]}"))$ ]] && die "Installation of '$package' is blocked (blacklist)."
 
     local installed_v=$(get_installed_version "$package")
@@ -155,8 +169,12 @@ cmd_install_local() {
 process_extension() {
     local package="$1" host_version="$2" available_v="$3" mode="$4"
 
+    # Vytvoříme přesný název rozšíření včetně verze Fedory (např. htop-fc43)
+    local ext_name="${package}-fc${host_version}"
+
     mkdir -p "$WORKDIR/usr/lib/extension-release.d"
-    echo -e "ID=fedora\nVERSION_ID=$host_version\nSYSEXT_VERSION_ID=$available_v" > "$WORKDIR/usr/lib/extension-release.d/extension-release.${package}"
+    # Jméno extension-release souboru musí přesně odpovídat názvu .raw souboru
+    echo -e "ID=fedora\nVERSION_ID=$host_version\nSYSEXT_VERSION_ID=$available_v" > "$WORKDIR/usr/lib/extension-release.d/extension-release.${ext_name}"
 
     if [[ "$mode" != "update" ]] && ! [[ " ${SPECIAL_PACKAGES[*]} " =~ " ${package} " ]] && [[ -d "$WORKDIR/etc" ]]; then
         info "Processing configuration files from /etc..."
@@ -168,17 +186,17 @@ process_extension() {
         rm -rf "$WORKDIR/etc"
     fi
 
-    local raw_file="$WORKDIR/${package}.raw"
+    local raw_file="$WORKDIR/${ext_name}.raw"
     mkfs.erofs -zlz4hc --force-uid=0 --force-gid=0 --file-contexts=/etc/selinux/targeted/contexts/files/file_contexts "$raw_file" "$WORKDIR" >/dev/null
     distrobox-host-exec mv "$raw_file" "$STAGING_DIR/"
 
-    success "Extension $package was successfully dispatched to daemon for deployment."
+    success "Extension $ext_name was successfully dispatched to daemon for deployment."
     cleanup_workdir
 }
 
 cmd_list() {
     info "Listing installed system extensions:"
-    local packages=$(distrobox-host-exec find "$EXT_DIR" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -I {} basename {} .raw | sort | tr -d '\r')
+    local packages=$(distrobox-host-exec find "$EXT_DIR" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | sed 's/-fc[0-9]\+$//' | sort -u | tr -d '\r')
     [[ -z "$packages" ]] && { status "No packages are installed."; return 0; }
 
     for pkg in $packages; do
@@ -193,6 +211,13 @@ cmd_remove() {
     local pkg="$1"
     local force_all="${2:-false}"
 
+    # Přidaná pojistka: Ověření, zda balíček vůbec existuje
+    local check_exists=$(distrobox-host-exec find "$EXT_DIR" -maxdepth 1 \( -name "${pkg}-fc*.raw" -o -name "${pkg}.raw" \) 2>/dev/null)
+    if [[ -z "$check_exists" ]]; then
+        status "Package '$pkg' is not installed. Nothing to do."
+        return 0
+    fi
+
     info "Requesting daemon to remove extension $pkg..."
 
     # Signal to delete the .raw file
@@ -205,12 +230,12 @@ cmd_remove() {
         awk "/^######## $pkg ########/{flag=1; next} /^########/{flag=0} flag" "$TRACKER_FILE" > "$STAGING_DIR/${pkg}.etc.remove"
     fi
 
-    status "Removal request for package $pkg was sent."
+    success "Removal request for package $pkg was sent."
 }
 
 cmd_check_update() {
     info "Checking for available updates..."
-    local packages=$(distrobox-host-exec find "$EXT_DIR" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -I {} basename {} .raw | sort | tr -d '\r')
+    local packages=$(distrobox-host-exec find "$EXT_DIR" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | sed 's/-fc[0-9]\+$//' | sort -u | tr -d '\r')
 
     [[ -z "$packages" ]] && { status "No packages are installed."; return 0; }
 
@@ -292,7 +317,7 @@ main() {
         install)       cmd_install "$2" "$h_v" "install" ;;
         install-local) cmd_install_local "$2" "$h_v" ;;
         update)
-            local pkgs=$(distrobox-host-exec find "$EXT_DIR" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | tr -d '\r')
+            local pkgs=$(distrobox-host-exec find "$EXT_DIR" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | sed 's/-fc[0-9]\+$//' | sort -u | tr -d '\r')
             [[ -z "$pkgs" ]] && { status "No packages installed for update."; exit 0; }
             for p in $pkgs; do cmd_install "$p" "$h_v" "update"; done
             ;;
