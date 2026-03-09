@@ -1,6 +1,6 @@
 Name:           sysext-creator
-Version:        1.6.2
-Release:        1%{?dist}
+Version:        1.6.1
+Release:        2%{?dist}
 Summary:        Správce systémových rozšíření pro Fedoru Kinoite/Silverblue
 
 License:        MIT
