@@ -132,6 +132,21 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now sysext-creator-heal.service
 
+sudo tee /etc/yum.repos.d/_copr_nadmartin-sysext-creator.repo > /dev/null << 'EOF'
+[copr:copr.fedorainfracloud.org:nadmartin:sysext-creator]
+name=Copr repo for sysext-creator owned by nadmartin
+baseurl=https://download.copr.fedorainfracloud.org/results/nadmartin/sysext-creator/fedora-$releasever-$basearch/
+type=rpm-md
+skip_if_unavailable=True
+gpgcheck=1
+gpgkey=https://download.copr.fedorainfracloud.org/results/nadmartin/sysext-creator/pubkey.gpg
+repo_gpgcheck=0
+enabled=1
+enabled_metadata=1
+exclude=*.src*
+EOF
+
+/etc/yum.repos.d/
 echo "✅ Auto-Healer je aktivní. Nástroj nyní přežije upgrady systému."
 echo "--------------------------------------------------------"
 echo "✅ Aktivace dokončena!"
