@@ -17,8 +17,14 @@ for req_file in "$STAGING_DIR"/*.version-req; do
     [[ -z "$pkg_name" || "$pkg_name" == "*" ]] && { rm -f "$req_file"; continue; }
 
     res_file="$STAGING_DIR/${pkg_name}.version-res"
-    if [[ -f "$EXT_DIR/${pkg_name}.raw" ]]; then
-        systemd-dissect --with "$EXT_DIR/${pkg_name}.raw" cat "usr/lib/extension-release.d/extension-release.${pkg_name}" 2>/dev/null | grep "^SYSEXT_VERSION_ID=" | cut -d'=' -f2 > "$res_file" || touch "$res_file"
+
+    # BEZPEČNÉ HLEDÁNÍ (bez příkazu ls, který by mohl skript sestřelit)
+    files=("$EXT_DIR"/${pkg_name}-fc*.raw "$EXT_DIR"/${pkg_name}.raw)
+    raw_file="${files[0]:-}"
+
+    if [[ -n "$raw_file" && -f "$raw_file" ]]; then
+        ext_name=$(basename "$raw_file" .raw)
+        systemd-dissect --with "$raw_file" cat "usr/lib/extension-release.d/extension-release.${ext_name}" 2>/dev/null | grep "^SYSEXT_VERSION_ID=" | cut -d'=' -f2 > "$res_file" || touch "$res_file"
     else
         touch "$res_file"
     fi
@@ -39,7 +45,8 @@ for del_file in "$STAGING_DIR"/*.delete; do
     [[ -z "$pkg_name" || "$pkg_name" == "*" ]] && { rm -f "$del_file"; continue; }
 
     log "Removing extension: $pkg_name"
-    rm -f "$EXT_DIR/${pkg_name}.raw"
+    # Smažeme všechny varianty daného rozšíření (s verzí i bez)
+    rm -f "$EXT_DIR/${pkg_name}-fc"*.raw "$EXT_DIR/${pkg_name}.raw"
     rm -f "$del_file"
     REFRESH_NEEDED=1
 done
@@ -55,7 +62,6 @@ for raw_file in "$STAGING_DIR"/*.raw; do
         chown root:root "$EXT_DIR/$pkg_file"
         chmod 0644 "$EXT_DIR/$pkg_file"
 
-        # Ochrana SELinuxu
         if command -v restorecon >/dev/null 2>&1; then
             restorecon "$EXT_DIR/$pkg_file" || err "Failed to restorecon $pkg_file"
         fi
