@@ -1,5 +1,5 @@
 Name:           sysext-creator
-Version:        1.5.0
+Version:        1.6.0
 Release:        1%{?dist}
 Summary:        Správce systémových rozšíření pro Fedoru Kinoite/Silverblue
 
@@ -9,6 +9,8 @@ Source0:        %{name}-%{version}.tar.gz
 
 BuildArch:      noarch
 BuildRequires:  systemd-rpm-macros
+BuildRequires:	desktop-file-utils
+BuildRequires:	libappstream-glib
 # Závislosti, které musí hostitelský systém mít (aby fungovalo GUI a wrapper)
 Requires:       distrobox
 Requires:       libnotify
@@ -20,7 +22,7 @@ rozšíření (systemd-sysext) pomocí kontejnerů Distrobox.
 
 %package kinoite
 Summary: GUI for sysext-creator
-BuildArch: noarch
+BuildArch:      noarch
 Requires:       python3-pyqt6
 Requires: %{name} = %{version}-%{release}
 
@@ -60,6 +62,13 @@ install -D -m 644 sysext-install.desktop $RPM_BUILD_ROOT%{_datadir}/kio/servicem
 install -D -m 644 bash-completion $RPM_BUILD_ROOT%{_datadir}/bash-completion/completions/sysext-creator
 install -D -m 644 sysext-update.service $RPM_BUILD_ROOT/usr/lib/systemd/user/sysext-update.service
 install -D -m 644 sysext-update.timer $RPM_BUILD_ROOT/usr/lib/systemd/user/sysext-update.timer
+mkdir -p %{buildroot}%{_datadir}/metainfo
+cp sysext-creator.metainfo.xml %{buildroot}%{_metainfodir}
+
+%check
+appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/*.metainfo.xml
+desktop-file-validate %{buildroot}%{_datadir}/applications/*.desktop
+
 %post
 # Zaregistruje a spustí systemd path unit po instalaci balíčku
 %systemd_post sysext-creator-deploy.path
@@ -83,7 +92,7 @@ install -D -m 644 sysext-update.timer $RPM_BUILD_ROOT/usr/lib/systemd/user/sysex
 %{_datadir}/bash-completion/completions/sysext-creator
 %{_userunitdir}/sysext-update.service
 %{_userunitdir}/sysext-update.timer
-
+%{_metainfodir}/*.metainfo.xml
 %files kinoite
 %{_bindir}/sysext-gui
 %{_datadir}/applications/sysext-creator.desktop
@@ -91,5 +100,13 @@ install -D -m 644 sysext-update.timer $RPM_BUILD_ROOT/usr/lib/systemd/user/sysex
 %{_datadir}/kio/servicemenus/sysext-install.desktop
 
 %changelog
+* Mon Mar 09 2026 Martin Naď <namar66@gmail.com> - 1.6.0-1
+- Added Auto-Healer: automatic recovery of the tool after Fedora upgrade.
+- Image versioning: full compatibility with systemd-sysext (-fcXX.raw format).
+- Improved GUI: dynamic detection of versioned images and smoother operation.
+- Stability: fixed SELinux contexts for services and fixed pipefail error in daemon.
+- Maintenance: added complete and safe uninstall option.
+- Optimization: smart skipping of updates for local packages and handling of non-existent files when deleting.
+
 * Sun Mar 08 2026 Tvoje Jmeno <email@example.com> - 1.5.0-1
 - Initial RPM package release for Atomic Fedora
