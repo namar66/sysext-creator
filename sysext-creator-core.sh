@@ -213,18 +213,27 @@ cmd_doctor() {
     local ext_count=0
     local has_errors=0
 
-    for img in "$EXT_DIR"/*.raw; do
-        [ -e "$img" ] || continue
+    # OPRAVA: Načítáme seznam souborů z hostitelského systému, ne z kontejneru!
+    local images=$(distrobox-host-exec find "$EXT_DIR" -maxdepth 1 -name "*.raw" -type f 2>/dev/null)
+
+    if [[ -z "$images" ]]; then
+        echo "--------------------------------------------------------"
+        status "No installed images found for diagnostics."
+        return 0
+    fi
+
+    # Zpracujeme každý nalezený obraz
+    for img in $images; do
         ((ext_count++))
         local img_name=$(basename "$img" .raw)
-
+        
         echo "--------------------------------------------------------"
         echo "🔍 Checking image: $img_name.raw"
-
+        
         # 1. LABEL AND VERSION CHECK
         local release_file="usr/lib/extension-release.d/extension-release.${img_name}"
         local img_ver=""
-
+        
         if ! distrobox-host-exec systemd-dissect --with "$img" cat "$release_file" >/dev/null 2>&1; then
             err "❌ ERROR: Missing or incorrectly named release label!"
             echo "   Expected path inside the image: /$release_file"
@@ -242,14 +251,13 @@ cmd_doctor() {
         # 2. BASE SYSTEM CONFLICT CHECK (Shadowing)
         echo "🛠️ Scanning for conflicts with the base system (shadowing)..."
         local conflicts=0
-
-        # Get a list of all files in the image (filtering only /usr/bin, /usr/sbin, /usr/lib)
+        
+        # Získáme seznam všech souborů v obrazu (vyfiltrujeme jen binárky a knihovny)
         local files_to_check=$(distrobox-host-exec systemd-dissect --list "$img" | grep -E '^/usr/(bin|sbin|lib/systemd)/')
-
+        
         for file in $files_to_check; do
-            # Ask the host RPM database if this file is already owned by the base OS
+            # Ptáme se hostitelského RPM, jestli tento soubor už vlastní base OS
             if distrobox-host-exec rpm -qf "$file" >/dev/null 2>&1; then
-                # If it's a real file and not just a directory, report a conflict
                 if ! distrobox-host-exec test -d "$file"; then
                     err "   ⚠️ CONFLICT DETECTED: $file (already exists in the base system!)"
                     ((conflicts++))
@@ -266,9 +274,7 @@ cmd_doctor() {
     done
 
     echo "--------------------------------------------------------"
-    if [[ $ext_count -eq 0 ]]; then
-        status "No installed images found for diagnostics."
-    elif [[ $has_errors -eq 0 ]]; then
+    if [[ $has_errors -eq 0 ]]; then
         success "🎉 Diagnostics completed. All images are in 100% perfect condition!"
     else
         err "⚠️ Diagnostics completed, but issues were found. Please fix them, or the system extensions might not work properly."
