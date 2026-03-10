@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Sysext-Creator Wrapper (v2.0.0 - Pure Podman Edition)
+# Sysext-Creator Wrapper (v2.0 - Pure Podman Edition)
 ################################################################################
 
 set -euo pipefail
@@ -23,6 +23,15 @@ HOST_CORE_PATH=$(realpath "$RAW_CORE_PATH")
 # musíme hostitelskou cestu VŽDY hledat přes náš namapovaný root (/run/host)
 CORE_EXEC="/run/host${HOST_CORE_PATH}"
 
+# ======================================================================
+# POMOCNÉ FUNKCE NA HOSTITELI (Mimo kontejner)
+# ======================================================================
+resolve_deps() {
+    local target="$1"
+    # Voláme rpm-ostree BEZPEČNĚ přímo na hostiteli
+    rpm-ostree install --dry-run "$target" 2>/dev/null | sed -n -e '/packages:/,$p' -e '/^Added:/,$p' | grep -E '^  [a-zA-Z0-9]' | awk '{print $1}' | sed -E 's/-[0-9].*//' | sort -u | tr '\n' ' ' || true
+}
+
 cmd_doctor() {
     echo "=> 🩺 Requesting system diagnostics from daemon..."
     local req_file="/var/tmp/sysext-staging/doctor.req"
@@ -31,7 +40,6 @@ cmd_doctor() {
     rm -f "$res_file"
     touch "$req_file"
 
-    # Čekáme, dokud démon nezpracuje požadavek (timeout 15 sekund)
     local counter=0
     while [[ ! -f "$res_file" ]]; do
         sleep 0.5
@@ -43,7 +51,6 @@ cmd_doctor() {
         fi
     done
 
-    # Vypíšeme výsledek a uklidíme
     cat "$res_file"
     rm -f "$res_file"
 }
@@ -71,7 +78,7 @@ get_installed_version() {
 cmd_list() {
     echo "=> Listing installed system extensions:"
     local packages=$(find "/var/lib/extensions" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | sed 's/-fc[0-9]\+$//' | sort -u | tr -d '\r')
-
+    
     if [[ -z "$packages" ]]; then
         echo "📋 No packages are installed."
         return 0
@@ -128,19 +135,15 @@ garbage_collect() {
 check_container() {
     local recreate=0
 
-    # Zkontrolujeme, zda kontejner existuje
     if ! podman ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-        echo "⚠️ Container $CONTAINER_NAME does not exist."
         recreate=1
     else
-        # Kontrola, jestli má kontejner správné mounty (pro nativní Podman)
         local mounts=$(podman inspect "$CONTAINER_NAME" --format '{{.Mounts}}' 2>/dev/null || true)
         if [[ "$mounts" != *"$STAGING_DIR"* ]] || [[ "$mounts" != *"/run/host"* ]]; then
             echo "⚠️ Container $CONTAINER_NAME is missing required mounts. Rebuilding..."
             podman rm -f "$CONTAINER_NAME" >/dev/null 2>&1
             recreate=1
         else
-            # Pokud existuje, ale neběží, probudíme ho
             local state=$(podman inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null || echo "false")
             if [[ "$state" != "true" ]]; then
                 echo "=> Waking up sleeping container $CONTAINER_NAME..."
@@ -151,7 +154,7 @@ check_container() {
 
     if [[ $recreate -eq 1 ]]; then
         echo "=> Starting build of persistent Podman container $CONTAINER_NAME..."
-
+        
         podman run -d --name "$CONTAINER_NAME" \
             --privileged \
             -v "$STAGING_DIR":"$STAGING_DIR":rw \
@@ -168,30 +171,44 @@ check_container() {
     fi
 }
 
+# ======================================================================
+# HLAVNÍ LOGIKA (Vstupní bod)
+# ======================================================================
 main() {
-    [[ $# -lt 1 ]] && { echo "Usage: sysext-creator install|install-local|update|check-update|search [package/path]"; exit 1; }
+    [[ $# -lt 1 ]] && { echo "Usage: sysext-creator install|install-local|update|check-update|rm|list|search|doctor [package/path]"; exit 1; }
 
     garbage_collect
     check_container
 
     local cmd="$1"
-
-    # 1. Zjistíme seznam na hostiteli (ten umí číst chráněnou složku)
     local pkgs=$(find "/var/lib/extensions" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | sed 's/-fc[0-9]\+$//' | sort -u | tr -d '\r' | tr '\n' ' ' || true)
 
     case "$cmd" in
         install)
             local target="$2"
+            echo "=> Resolving dependencies via host system..."
+            local deps=$(resolve_deps "$target")
+
             if [[ -f "$target" && "$target" == *.rpm ]]; then
                 local abs_path=$(realpath "$target")
                 echo "=> Local package detected, starting offline installation..."
-                podman exec -i "$CONTAINER_NAME" "$CORE_EXEC" install-local "$abs_path"
+                podman exec -e RESOLVED_DEPS="$deps" -i "$CONTAINER_NAME" "$CORE_EXEC" install-local "$abs_path"
             else
-                podman exec -i "$CONTAINER_NAME" "$CORE_EXEC" install "$target"
+                podman exec -e RESOLVED_DEPS="$deps" -i "$CONTAINER_NAME" "$CORE_EXEC" install "$target"
             fi
             ;;
-        update|check-update)
-            # 2. TUNEL: Tady pošleme ten náš seznam dovnitř kontejneru
+        update)
+            if [[ -z "$pkgs" || "$pkgs" == " " ]]; then
+                echo "📋 No packages installed for update."
+                exit 0
+            fi
+            for target in $pkgs; do
+                echo "=> Resolving dependencies for $target via host system..."
+                local deps=$(resolve_deps "$target")
+                podman exec -e RESOLVED_DEPS="$deps" -i "$CONTAINER_NAME" "$CORE_EXEC" update-single "$target"
+            done
+            ;;
+        check-update)
             podman exec -e HOST_PKGS="$pkgs" -i "$CONTAINER_NAME" "$CORE_EXEC" "$@"
             ;;
         search)
@@ -203,7 +220,6 @@ main() {
             ;;
     esac
 }
-#COMMAND="$1"
 
 COMMAND="${1:-}"
 
@@ -219,5 +235,5 @@ elif [[ "$COMMAND" == "rm" ]]; then
     exit 0
 fi
 
-# Pokud to není ani jeden z výše uvedených, nabootujeme kontejner a pošleme to do něj
+# Pokud to není ani jeden z výše uvedených, předáme kontrolu funkci main (kontejneru)
 main "$@"
