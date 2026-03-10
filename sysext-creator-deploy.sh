@@ -29,7 +29,7 @@ for req_file in "$STAGING_DIR"/*.version-req; do
         ext_name=$(basename "$raw_file" .raw)
 
         # OPRAVA: Použití --copy-from místo cat a ochrana přes || true proti pádu démona
-        ver=$(systemd-dissect --copy-from "$raw_file" "/usr/lib/extension-release.d/extension-release.${ext_name}" - 2>/dev/null | grep "^VERSION_ID=" | cut -d'=' -f2 || true)
+        ver=$(systemd-dissect --copy-from "$raw_file" "/usr/lib/extension-release.d/extension-release.${ext_name}" - 2>/dev/null | grep "^SYSEXT_VERSION_ID=" | cut -d'=' -f2 || true)
 
         if [[ -n "$ver" ]]; then
             echo "$ver" > "$res_file"
