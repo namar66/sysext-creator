@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Sysext-Creator Wrapper (v2.0 - Pure Podman Edition)
+# Sysext-Creator Wrapper (v2.0.0 - Pure Podman Edition)
 ################################################################################
 
 set -euo pipefail
