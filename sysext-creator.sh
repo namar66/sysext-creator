@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Sysext-Creator Wrapper (v1.6.0 - Universal & Self-Contained SELinux)
+# Sysext-Creator Wrapper (v1.6.2 - Universal & Self-Contained SELinux)
 ################################################################################
 
 set -euo pipefail
@@ -87,7 +87,7 @@ main() {
                 distrobox enter "$CONTAINER_NAME" -- "$CORE_EXEC" install "$target"
             fi
             ;;
-        rm|update|check-update|list|search)
+        rm|update|check-update|list|search|doctor)
             distrobox enter "$CONTAINER_NAME" -- "$CORE_EXEC" "$@"
             ;;
         *)
