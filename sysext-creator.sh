@@ -10,19 +10,18 @@ HOST_VERSION=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
 CONTAINER_NAME="sysext-box-fc${HOST_VERSION}"
 STAGING_DIR="/var/tmp/sysext-staging"
 
-# Chytrá autodetekce jádra (Local vs System-wide)
-if ! HOST_CORE_PATH=$(command -v sysext-creator-core 2>/dev/null); then
+# Chytrá autodetekce jádra
+if ! RAW_CORE_PATH=$(command -v sysext-creator-core 2>/dev/null); then
     echo "❌ Error: sysext-creator-core not found in PATH."
     exit 1
 fi
 
-if [[ "$HOST_CORE_PATH" == /usr/* ]]; then
-    # Běžíme z RPM balíčku nebo RAW obrazu -> kontejner musí jít přes můstek
-    CORE_EXEC="/run/host${HOST_CORE_PATH}"
-else
-    # Běžíme lokálně (např. ~/.local/bin) -> kontejner sdílí složku přímo
-    CORE_EXEC="$HOST_CORE_PATH"
-fi
+# Získáme absolutní cestu (pojistka proti symlinkům)
+HOST_CORE_PATH=$(realpath "$RAW_CORE_PATH")
+
+# Jelikož čistý Podman nemá automaticky namapovanou domovskou složku,
+# musíme hostitelskou cestu VŽDY hledat přes náš namapovaný root (/run/host)
+CORE_EXEC="/run/host${HOST_CORE_PATH}"
 
 cmd_doctor() {
     echo "=> 🩺 Requesting system diagnostics from daemon..."
