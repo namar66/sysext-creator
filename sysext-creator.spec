@@ -1,5 +1,5 @@
 Name:           sysext-creator
-Version:        1.6.2
+Version:        2.0.0
 Release:        1%{?dist}
 Summary:        Správce systémových rozšíření pro Fedoru Kinoite/Silverblue
 
@@ -12,7 +12,6 @@ BuildRequires:  systemd-rpm-macros
 BuildRequires:	desktop-file-utils
 BuildRequires:	libappstream-glib
 # Závislosti, které musí hostitelský systém mít (aby fungovalo GUI a wrapper)
-Requires:       distrobox
 Requires:       libnotify
 
 %description
@@ -100,6 +99,10 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/*.desktop
 %{_datadir}/kio/servicemenus/sysext-install.desktop
 
 %changelog
+* Tue Mar 10 2026 Martin Naď <namar66@gmail.com> - 2.0.0-1
+- update pure podman version
+- bug fixes
+
 * Tue Mar 10 2026 Martin Naď <namar66@gmail.com> - 1.6.2-1
 - add basic inspect function doctor
 
