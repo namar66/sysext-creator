@@ -29,16 +29,14 @@ cleanup_workdir() { [[ -n "$WORKDIR" && -d "$WORKDIR" ]] && rm -rf "$WORKDIR"; }
 validate_environment() {
     for cmd in "${REQUIRED_CMDS[@]}"; do
         if ! command -v "$cmd" &>/dev/null; then
-            die "Missing required command: $cmd\nInstall with: sudo dnf install -y erofs-utils cpio dnf-utils"
+            die "Missing required command: $cmd\nInstall with: dnf install -y erofs-utils cpio dnf-utils"
         fi
     done
 
-    # Mapovaná složka z hostitele
     if [[ ! -w "$STAGING_DIR" ]]; then
         die "Missing write permissions to $STAGING_DIR. Ensure the host daemon is active."
     fi
 
-    # Čteme verzi hostitele z namapovaného /run/host/etc/os-release
     local host_version=$(grep VERSION_ID= /run/host/etc/os-release | cut -d'=' -f2 | tr -d '\r\n"')
     local guest_version=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '\r\n"')
 
@@ -54,10 +52,7 @@ get_installed_version() {
     local req_file="$STAGING_DIR/${pkg}.version-req"
     local res_file="$STAGING_DIR/${pkg}.version-res"
 
-    # 1. Send signal to the daemon
     touch "$req_file"
-
-    # 2. Wait for daemon to provide the answer
     local timeout=20
     while [[ ! -f "$res_file" && $timeout -gt 0 ]]; do
         sleep 0.2
@@ -74,19 +69,11 @@ get_installed_version() {
 
 get_available_version() { dnf repoquery --latest-limit=1 --queryformat "%{version}-%{release}" "$1" 2>/dev/null || echo ""; }
 
-get_host_packages() {
-    local target="$1"
-    # Použití chrootu na namapovaný systém pro získání rpm-ostree dat
-    local raw_output=$(chroot /run/host rpm-ostree install --dry-run "$target" 2>/dev/null)
-    echo "$raw_output" | sed -n -e '/packages:/,$p' -e '/^Added:/,$p' | grep -E '^  [a-zA-Z0-9]' | awk '{print $1}' | sed -E 's/-[0-9].*//' | sort -u | tr '\n' ' '
-}
-
 cmd_install() {
     local package="$1" host_version="$2" mode="${3:-install}"
 
     if [[ " ${SPECIAL_PACKAGES[*]} " =~ " ${package} " ]]; then
         if [[ "$package" == "sysext-creator" ]]; then
-            # Přečteme os-release přímo z hostitele
             if grep -iq "kinoite" /run/host/etc/os-release || [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]]; then
                 info "Special package detected: Switching to sysext-creator-kinoite (GUI)"
                 package="sysext-creator-kinoite"
@@ -118,8 +105,8 @@ cmd_install() {
     WORKDIR=$(mktemp -d)
     mkdir -p "$WORKDIR/rpms"
 
-    info "Resolving dependencies via host system..."
-    local deps=$(get_host_packages "$package")
+    info "Reading resolved dependencies from host tunnel..."
+    local deps="${RESOLVED_DEPS:-}"
     [[ -z "$deps" || "$deps" == " " ]] && deps="$package"
 
     info "Downloading and extracting RPM packages..."
@@ -147,10 +134,9 @@ cmd_install_local() {
     WORKDIR=$(mktemp -d)
     mkdir -p "$WORKDIR/rpms"
 
-    info "Detecting dependencies via host system..."
-    local deps=$(get_host_packages "$rpm_path")
-
-    deps=$(echo "$deps" | tr ' ' '\n' | grep -v "^${package}$" | tr '\n' ' ' | xargs)
+    info "Reading resolved dependencies from host tunnel..."
+    local deps="${RESOLVED_DEPS:-}"
+    deps=$(echo "$deps" | tr ' ' '\n' | grep -v "^${package}$" | tr '\n' ' ' | xargs || true)
 
     if [[ -n "$deps" ]]; then
         info "Fetching missing dependencies from Fedora repositories: $deps"
@@ -260,16 +246,12 @@ cmd_search() {
 }
 
 main() {
-    [[ $# -lt 1 ]] && { echo "Usage: $0 install|install-local|update|check-update|rm|list|search [package/path]"; exit 1; }
+    [[ $# -lt 1 ]] && { echo "Usage: $0 install|install-local|update-single|check-update|search [package/path]"; exit 1; }
     local h_v=$(validate_environment)
     case "$1" in
         install)       cmd_install "$2" "$h_v" "install" ;;
         install-local) cmd_install_local "$2" "$h_v" ;;
-        update)
-            local pkgs="${HOST_PKGS:-}"
-            [[ -z "$pkgs" ]] && { status "No packages installed for update."; exit 0; }
-            for p in $pkgs; do cmd_install "$p" "$h_v" "update"; done
-            ;;
+        update-single) cmd_install "$2" "$h_v" "update" ;;
         check-update)  cmd_check_update ;;
         search)        cmd_search "${2:-}" ;;
         *)             die "Unknown command: $1" ;;
