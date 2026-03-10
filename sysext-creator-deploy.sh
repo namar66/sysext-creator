@@ -29,7 +29,7 @@ for req_file in "$STAGING_DIR"/*.version-req; do
         ext_name=$(basename "$raw_file" .raw)
 
         # OPRAVA: Použití --copy-from místo cat a ochrana přes || true proti pádu démona
-        ver=$(systemd-dissect --copy-from "$raw_file" "/usr/lib/extension-release.d/extension-release.${ext_name}" - 2>/dev/null | grep "^SYSEXT_VERSION_ID=" | cut -d'=' -f2 || true)
+        ver=$(systemd-dissect --copy-from "$raw_file" "/usr/lib/extension-release.d/extension-release.${ext_name}" - 2>/dev/null | grep "^SYSEXT_VERSION_ID=" | cut -d'=' -f2 | tr -d '"' || true)
 
         if [[ -n "$ver" ]]; then
             echo "$ver" > "$res_file"
@@ -79,6 +79,9 @@ for raw_file in "$STAGING_DIR"/*.raw; do
     # OPRAVA: Použití cp a rm místo mv zamezí varováním s rootless namespaces
     if cp "$raw_file" "$EXT_DIR/" && rm -f "$raw_file"; then
         chmod 0644 "$EXT_DIR/$pkg_file"
+     if command -v restorecon >/dev/null 2>&1; then
+            restorecon "$EXT_DIR/$pkg_file" || err "Failed to restorecon $pkg_file"
+     fi
         REFRESH_NEEDED=1
     else
         err "Failed to deploy $pkg_file"
