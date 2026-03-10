@@ -8,9 +8,10 @@ import glob
 import re
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QTabWidget, QTableWidget, QTableWidgetItem,
-                             QPushButton, QLineEdit, QLabel, QHeaderView, QMessageBox)
+                             QPushButton, QLineEdit, QLabel, QHeaderView, QMessageBox,
+                             QDialog, QPlainTextEdit)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QFont
 
 # ======================================================================
 # MULTILANGUAGE SUPPORT (I18N)
@@ -51,7 +52,17 @@ I18N = {
         "op_install": "Installation",
         "op_rm": "Removal",
         "op_update": "Update",
-        "op_completed": "✅ {} Completed"
+        "op_completed": "✅ {} Completed",
+        "btn_doctor": "🩺 Run Doctor",
+        "doctor_title": "🩺 System Diagnostics (Sysext Doctor)",
+        "doctor_init": "Starting diagnostics. Please wait for the password prompt...",
+        "doctor_success": "✅ Diagnostics completed.",
+        "doctor_cancel": "❌ Action cancelled by user (missing permissions).",
+        "doctor_cancel_msg": "Administrator password is required to run diagnostics.",
+        "doctor_warning": "⚠️ Diagnostics found issues in the system.",
+        "doctor_critical": "❌ Critical error: Tool not found.",
+        "doctor_critical_msg": "Cannot find 'pkexec' or 'sysext-creator'.",
+        "btn_close": "Close"
     },
     "cs": {
         "app_title": "Sysext-Creator: App Store",
@@ -85,7 +96,17 @@ I18N = {
         "op_install": "Instalace",
         "op_rm": "Odstranění",
         "op_update": "Aktualizace",
-        "op_completed": "✅ {} dokončena"
+        "op_completed": "✅ {} dokončena",
+        "btn_doctor": "🩺 Diagnostika (Doctor)",
+        "doctor_title": "🩺 Diagnostika systému (Sysext Doctor)",
+        "doctor_init": "Spouštím diagnostiku. Vyčkejte na zobrazení výzvy pro zadání hesla...",
+        "doctor_success": "✅ Diagnostika byla dokončena.",
+        "doctor_cancel": "❌ Akce byla zrušena uživatelem (chybí oprávnění).",
+        "doctor_cancel_msg": "Pro spuštění diagnostiky je nutné zadat heslo administrátora.",
+        "doctor_warning": "⚠️ Diagnostika nalezla problémy v systému.",
+        "doctor_critical": "❌ Kritická chyba: Nástroj nebyl nalezen.",
+        "doctor_critical_msg": "Nelze najít 'pkexec' nebo 'sysext-creator'.",
+        "btn_close": "Zavřít"
     }
 }
 
@@ -192,6 +213,76 @@ class VersionWorker(QThread):
         self.finished.emit()
 
 # ======================================================================
+# 4. THREAD & DIALOG: SYSEXT DOCTOR (DIAGNOSTICS)
+# ======================================================================
+class DoctorWorker(QThread):
+    finished = pyqtSignal(int, str)
+
+    def run(self):
+        try:
+            process = subprocess.run(
+                ["pkexec", "sysext-creator", "doctor"],
+                capture_output=True,
+                text=True
+            )
+            output = (process.stdout + "\n" + process.stderr).strip()
+            self.finished.emit(process.returncode, output)
+        except FileNotFoundError:
+            self.finished.emit(-1, "FileNotFound")
+        except Exception as e:
+            self.finished.emit(-2, str(e))
+
+class DoctorDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(tr("doctor_title"))
+        self.resize(750, 500)
+
+        layout = QVBoxLayout(self)
+
+        self.lbl_status = QLabel(tr("doctor_init"))
+        self.lbl_status.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(self.lbl_status)
+
+        self.text_output = QPlainTextEdit()
+        self.text_output.setReadOnly(True)
+        font = QFont("Monospace")
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        font.setPointSize(10)
+        self.text_output.setFont(font)
+        layout.addWidget(self.text_output)
+
+        self.btn_close = QPushButton(tr("btn_close"))
+        self.btn_close.clicked.connect(self.accept)
+        self.btn_close.setEnabled(False)
+        layout.addWidget(self.btn_close)
+
+    def run_diagnostics(self):
+        self.worker = DoctorWorker()
+        self.worker.finished.connect(self.on_finished)
+        self.worker.start()
+
+    def on_finished(self, returncode, output):
+        self.btn_close.setEnabled(True)
+
+        if returncode == 0:
+            self.lbl_status.setText(tr("doctor_success"))
+            self.lbl_status.setStyleSheet("font-weight: bold; font-size: 14px; color: green;")
+            self.text_output.setPlainText(output)
+        elif returncode in [126, 127]:
+            self.lbl_status.setText(tr("doctor_cancel"))
+            self.lbl_status.setStyleSheet("font-weight: bold; font-size: 14px; color: red;")
+            self.text_output.setPlainText(tr("doctor_cancel_msg"))
+        elif returncode == -1:
+            self.lbl_status.setText(tr("doctor_critical"))
+            self.lbl_status.setStyleSheet("font-weight: bold; font-size: 14px; color: red;")
+            self.text_output.setPlainText(tr("doctor_critical_msg"))
+        else:
+            self.lbl_status.setText(tr("doctor_warning"))
+            self.lbl_status.setStyleSheet("font-weight: bold; font-size: 14px; color: orange;")
+            self.text_output.setPlainText(output)
+
+# ======================================================================
 # MAIN MANAGER WINDOW
 # ======================================================================
 class SysextManager(QMainWindow):
@@ -231,12 +322,18 @@ class SysextManager(QMainWindow):
         btn_layout = QHBoxLayout()
         self.version_btn = QPushButton(tr("btn_load_ver"))
         self.version_btn.clicked.connect(self.load_versions)
+
+        self.doctor_btn = QPushButton(tr("btn_doctor"))
+        self.doctor_btn.clicked.connect(self.open_doctor_dialog)
+
         self.refresh_btn = QPushButton(tr("btn_update_all"))
         self.refresh_btn.clicked.connect(self.update_all)
 
         btn_layout.addWidget(self.version_btn)
+        btn_layout.addWidget(self.doctor_btn)
         btn_layout.addStretch()
         btn_layout.addWidget(self.refresh_btn)
+
         layout.addLayout(btn_layout)
         self.tabs.addTab(tab, tr("tab_installed"))
 
@@ -382,6 +479,11 @@ class SysextManager(QMainWindow):
             btn = QPushButton(tr("btn_install"))
             btn.clicked.connect(lambda ch, p=name, b=btn: self.install_package(p, b))
             self.search_table.setCellWidget(row, 2, btn)
+
+    def open_doctor_dialog(self):
+        dialog = DoctorDialog(self)
+        dialog.show()
+        dialog.run_diagnostics()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
