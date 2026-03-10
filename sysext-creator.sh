@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Sysext-Creator Wrapper (v1.6.0 - Universal & Self-Contained SELinux)
+# Sysext-Creator Wrapper (v1.6.2 - Universal & Self-Contained SELinux)
 ################################################################################
 
 set -euo pipefail
@@ -25,95 +25,28 @@ else
 fi
 
 cmd_doctor() {
-    echo "=> 🩺 Starting diagnostics of installed images (Sysext Doctor)..."
-    local host_ver=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
-    local ext_dir="/var/lib/extensions"
-    local ext_count=0
-    local has_errors=0
+    echo "=> 🩺 Requesting system diagnostics from daemon..."
+    local req_file="/var/tmp/sysext-staging/doctor.req"
+    local res_file="/var/tmp/sysext-staging/doctor.res"
 
-    echo "=> Vyžadována práva administrátora pro analýzu obrazů..."
-    sudo -v || { echo "❌ Sudo oprávnění bylo zamítnuto." >&2; exit 1; }
+    rm -f "$res_file"
+    touch "$req_file"
 
-    local images=$(find "$ext_dir" -maxdepth 1 -name "*.raw" -type f 2>/dev/null || true)
-
-    if [[ -z "$images" ]]; then
-        echo "--------------------------------------------------------"
-        echo "📋 No installed images found for diagnostics."
-        return 0
-    fi
-
-    for img in $images; do
-        ext_count=$((ext_count + 1))
-        local img_name=$(basename "$img" .raw)
-
-        echo "--------------------------------------------------------"
-        echo "🔍 Checking image: $img_name.raw"
-
-        # 1. STRUCTURAL INTEGRITY CHECK
-        if ! sudo systemd-dissect --validate "$img" >/dev/null 2>&1; then
-            echo "❌ ERROR: Image structure is corrupted or invalid!" >&2
-            has_errors=1
-            continue
-        else
-            echo "✅ Image structure and format are valid."
-        fi
-
-        # 2. LABEL AND VERSION CHECK
-        local release_file="usr/lib/extension-release.d/extension-release.${img_name}"
-        local img_ver=""
-
-        if ! sudo systemd-dissect --copy-from "$img" "/$release_file" - >/dev/null 2>&1; then
-            echo "❌ ERROR: Missing or incorrectly named release label!" >&2
-            echo "   Expected path inside the image: /$release_file" >&2
-            has_errors=1
-        else
-            img_ver=$(sudo systemd-dissect --copy-from "$img" "/$release_file" - 2>/dev/null | grep "^VERSION_ID=" | cut -d'=' -f2 || true)
-            if [[ "$img_ver" != "$host_ver" ]]; then
-                echo "⚠️  WARNING: Image version ($img_ver) does not match the host ($host_ver)!" >&2
-                has_errors=1
-            else
-                echo "✅ Label and OS version ($img_ver) match."
-            fi
-        fi
-
-        # 3. BASE SYSTEM CONFLICT CHECK
-        echo "🛠️  Scanning for conflicts with the base system (shadowing)..."
-        local conflicts=0
-
-        # OPRAVA: Povolíme cesty bez lomítka na začátku (^/?)
-        local files_to_check=$(sudo systemd-dissect --list "$img" 2>/dev/null | grep -E '^/?usr/(bin|sbin|lib/systemd)/' || true)
-
-        if [[ -n "$files_to_check" ]]; then
-            for file in $files_to_check; do
-                # OPRAVA: Přidáme lomítko na začátek, aby RPM databáze soubor poznala
-                local abs_file="$file"
-                [[ "$abs_file" != /* ]] && abs_file="/$abs_file"
-
-                # Ptáme se hostitelské RPM databáze na absolutní cestu
-                if rpm -qf "$abs_file" >/dev/null 2>&1; then
-                    # Složky jako /usr/bin ignorujeme, zajímají nás jen skutečné soubory (binárky)
-                    if ! test -d "$abs_file"; then
-                        echo "   ⚠️  CONFLICT DETECTED: $abs_file (already exists in the base system!)" >&2
-                        conflicts=$((conflicts + 1))
-                    fi
-                fi
-            done
-        fi
-
-        if [[ $conflicts -eq 0 ]]; then
-            echo "✅ No conflicts with the base system found."
-        else
-            echo "❌ Found a total of $conflicts conflicting file(s)." >&2
-            has_errors=1
+    # Čekáme, dokud démon nezpracuje požadavek (timeout 15 sekund)
+    local counter=0
+    while [[ ! -f "$res_file" ]]; do
+        sleep 0.5
+        counter=$((counter + 1))
+        if [[ $counter -gt 30 ]]; then
+            echo "❌ ERROR: Daemon did not respond in time." >&2
+            rm -f "$req_file"
+            exit 1
         fi
     done
 
-    echo "--------------------------------------------------------"
-    if [[ $has_errors -eq 0 ]]; then
-        echo "✅ Diagnostics completed. All images are in 100% perfect condition!"
-    else
-        echo "⚠️  Diagnostics completed, but issues were found. Please fix them, or the system extensions might not work properly." >&2
-    fi
+    # Vypíšeme výsledek a uklidíme
+    cat "$res_file"
+    rm -f "$res_file"
 }
 
 garbage_collect() {
