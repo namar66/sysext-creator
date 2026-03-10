@@ -1,8 +1,8 @@
 #!/bin/bash
 
 ################################################################################
-# Sysext-Creator-Core (v1.6.1 - EN Edition)
-# Runs exclusively inside the distrobox container.
+# Sysext-Creator-Core (v2.0.0 - Pure Podman Edition)
+# Runs exclusively inside the persistent podman container.
 ################################################################################
 
 set -euo pipefail
@@ -33,15 +33,17 @@ validate_environment() {
         fi
     done
 
-    if ! distrobox-host-exec test -w "$STAGING_DIR"; then
+    # Mapovaná složka z hostitele
+    if [[ ! -w "$STAGING_DIR" ]]; then
         die "Missing write permissions to $STAGING_DIR. Ensure the host daemon is active."
     fi
 
-    local host_version=$(distrobox-host-exec grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '\r\n"')
+    # Čteme verzi hostitele z namapovaného /run/host/etc/os-release
+    local host_version=$(grep VERSION_ID= /run/host/etc/os-release | cut -d'=' -f2 | tr -d '\r\n"')
     local guest_version=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '\r\n"')
 
     if [[ "$host_version" != "$guest_version" ]]; then
-        distrobox-host-exec notify-send -u critical "Sysext-Creator" "OS upgrade detected! Run: sysext-creator upgrade-box" || true
+        warn "OS upgrade detected! Run: sysext-creator upgrade-box"
         die "OS mismatch: Host ($host_version) != Container ($guest_version)."
     fi
     echo "$host_version"
@@ -55,7 +57,7 @@ get_installed_version() {
     # 1. Send signal to the daemon
     touch "$req_file"
 
-    # 2. Wait for daemon to provide the answer (via systemd-dissect)
+    # 2. Wait for daemon to provide the answer
     local timeout=20
     while [[ ! -f "$res_file" && $timeout -gt 0 ]]; do
         sleep 0.2
@@ -74,18 +76,18 @@ get_available_version() { dnf repoquery --latest-limit=1 --queryformat "%{versio
 
 get_host_packages() {
     local target="$1"
-    local raw_output=$(distrobox-host-exec rpm-ostree install --dry-run "$target" 2>/dev/null)
+    # Použití chrootu na namapovaný systém pro získání rpm-ostree dat
+    local raw_output=$(chroot /run/host rpm-ostree install --dry-run "$target" 2>/dev/null)
     echo "$raw_output" | sed -n -e '/packages:/,$p' -e '/^Added:/,$p' | grep -E '^  [a-zA-Z0-9]' | awk '{print $1}' | sed -E 's/-[0-9].*//' | sort -u | tr '\n' ' '
 }
 
 cmd_install() {
     local package="$1" host_version="$2" mode="${3:-install}"
 
-    # Logika pro speciální balíčky (Sysext-Creator)
     if [[ " ${SPECIAL_PACKAGES[*]} " =~ " ${package} " ]]; then
         if [[ "$package" == "sysext-creator" ]]; then
-            # Detekce hostitele: Kinoite/KDE vs ostatní
-            if grep -iq "kinoite" /etc/os-release || [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]]; then
+            # Přečteme os-release přímo z hostitele
+            if grep -iq "kinoite" /run/host/etc/os-release || [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]]; then
                 info "Special package detected: Switching to sysext-creator-kinoite (GUI)"
                 package="sysext-creator-kinoite"
             else
@@ -101,7 +103,6 @@ cmd_install() {
 
     status "Package: $package | Available: ${available_v:-unknown} | Installed: ${installed_v:-none}"
 
-    # Protection for local packages (like lact)
     if [[ -z "$available_v" ]]; then
         if [[ "$mode" == "update" ]]; then
             status "Package $package is not in DNF repositories (local). Skipping update..."
@@ -149,7 +150,6 @@ cmd_install_local() {
     info "Detecting dependencies via host system..."
     local deps=$(get_host_packages "$rpm_path")
 
-    # Dependency filter: exclude the package itself
     deps=$(echo "$deps" | tr ' ' '\n' | grep -v "^${package}$" | tr '\n' ' ' | xargs)
 
     if [[ -n "$deps" ]]; then
@@ -169,17 +169,15 @@ cmd_install_local() {
 process_extension() {
     local package="$1" host_version="$2" available_v="$3" mode="$4"
 
-    # Vytvoříme přesný název rozšíření včetně verze Fedory (např. htop-fc43)
     local ext_name="${package}-fc${host_version}"
 
     mkdir -p "$WORKDIR/usr/lib/extension-release.d"
-    # Jméno extension-release souboru musí přesně odpovídat názvu .raw souboru
     echo -e "ID=fedora\nVERSION_ID=$host_version\nSYSEXT_VERSION_ID=$available_v" > "$WORKDIR/usr/lib/extension-release.d/extension-release.${ext_name}"
 
     if [[ "$mode" != "update" ]] && ! [[ " ${SPECIAL_PACKAGES[*]} " =~ " ${package} " ]] && [[ -d "$WORKDIR/etc" ]]; then
         info "Processing configuration files from /etc..."
         tar -czf "$WORKDIR/${package}.etc.tar.gz" -C "$WORKDIR/etc" .
-        distrobox-host-exec mv "$WORKDIR/${package}.etc.tar.gz" "$STAGING_DIR/"
+        mv "$WORKDIR/${package}.etc.tar.gz" "$STAGING_DIR/"
         mkdir -p "$STATE_DIR"
         echo "######## $package ########" >> "$TRACKER_FILE"
         find "$WORKDIR/etc" -type f | sed "s|$WORKDIR||" >> "$TRACKER_FILE"
@@ -188,60 +186,15 @@ process_extension() {
 
     local raw_file="$WORKDIR/${ext_name}.raw"
     mkfs.erofs -zlz4hc --force-uid=0 --force-gid=0 --file-contexts=/etc/selinux/targeted/contexts/files/file_contexts "$raw_file" "$WORKDIR" >/dev/null
-    distrobox-host-exec mv "$raw_file" "$STAGING_DIR/"
+    mv "$raw_file" "$STAGING_DIR/"
 
     success "Extension $ext_name was successfully dispatched to daemon for deployment."
     cleanup_workdir
 }
 
-cmd_list() {
-    info "Listing installed system extensions:"
-    local packages=$(distrobox-host-exec find "$EXT_DIR" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | sed 's/-fc[0-9]\+$//' | sort -u | tr -d '\r')
-    [[ -z "$packages" ]] && { status "No packages are installed."; return 0; }
-
-    for pkg in $packages; do
-        [[ -z "$pkg" ]] && continue
-        sleep 0.5
-        local v=$(get_installed_version "$pkg")
-        echo " 📦 $pkg (Version: ${v:-unknown})"
-    done
-}
-
-
-cmd_remove() {
-    local pkg="$1"
-    local force_all="${2:-false}"
-
-    # 1. INSURANCE: Protection against erasure of the tool itself
-    if [[ "$pkg" == "sysext-creator" || "$pkg" == "sysext-creator-kinoite" ]]; then
-        die "This tool cannot be removed with the regular rm command.\nFor complete and safe removal, use the installation script with the 'uninstall' argument (e.g. sysext-creator-setup uninstall)."
-    fi
-
-    # 2. INSURANCE: Verifying whether a package even exists
-    local check_exists=$(distrobox-host-exec find "$EXT_DIR" -maxdepth 1 \( -name "${pkg}-fc*.raw" -o -name "${pkg}.raw" \) 2>/dev/null)
-    if [[ -z "$check_exists" ]]; then
-        status "Package '$pkg' is not installed. Nothing to do."
-        return 0
-    fi
-
-    info "Requesting daemon to remove extension $pkg..."
-
-    # Signal to delete the .raw file
-    touch "$STAGING_DIR/${pkg}.delete"
-
-    # If we want to clean /etc, we write paths from tracker to .etc.remove
-    if [[ "$force_all" == "yes" && -f "$TRACKER_FILE" ]]; then
-        info "Extracting configuration files list for $pkg from tracker..."
-        # Awk finds the package header and prints lines until the next header
-        awk "/^######## $pkg ########/{flag=1; next} /^########/{flag=0} flag" "$TRACKER_FILE" > "$STAGING_DIR/${pkg}.etc.remove"
-    fi
-
-    success "Removal request for package $pkg was sent."
-}
-
 cmd_check_update() {
     info "Checking for available updates..."
-    local packages=$(distrobox-host-exec find "$EXT_DIR" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | sed 's/-fc[0-9]\+$//' | sort -u | tr -d '\r')
+    local packages="${HOST_PKGS:-}"
 
     [[ -z "$packages" ]] && { status "No packages are installed."; return 0; }
 
@@ -280,8 +233,6 @@ cmd_search() {
     [[ -z "$keyword" ]] && die "Enter a search term (e.g., sysext-creator search htop)."
 
     info "Searching for packages matching '$keyword'..."
-
-    # Using native DNF search for full-text search in names and summaries
     local raw_output=$(dnf --quiet search "$keyword" 2>/dev/null || true)
 
     if [[ -z "$raw_output" ]]; then
@@ -293,23 +244,15 @@ cmd_search() {
     printf "%-35s %s\n" "PACKAGE" "SUMMARY"
     echo "--------------------------------------------------------------------------------"
 
-    # Cleaning DNF output: discard info texts and extract clean name and summary
     echo "$raw_output" | awk '
-        # Skip info headers from DNF (Czech and English)
         /^Odpov/ || /^Matched/ || /^Aktualizace/ || /^Updating/ || /^Repozit/ || /^Repositories/ || /^Posled/ || /^Last/ || /^===/ {next}
-        # Skip empty or incomplete lines
         NF < 2 {next}
         {
             name_arch = $1
-            # Remove architecture from name (e.g., kate.x86_64 -> kate)
             sub(/\.(x86_64|noarch|i686|aarch64|src)$/, "", name_arch)
-
-            # Summary is the rest of the line
             $1 = ""
             summary = $0
             sub(/^ +/, "", summary)
-
-            # Print aligned to table
             printf "%-35s %s\n", name_arch, summary
         }
     ' | sort -u
@@ -323,14 +266,11 @@ main() {
         install)       cmd_install "$2" "$h_v" "install" ;;
         install-local) cmd_install_local "$2" "$h_v" ;;
         update)
-            local pkgs=$(distrobox-host-exec find "$EXT_DIR" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | sed 's/-fc[0-9]\+$//' | sort -u | tr -d '\r')
+            local pkgs="${HOST_PKGS:-}"
             [[ -z "$pkgs" ]] && { status "No packages installed for update."; exit 0; }
             for p in $pkgs; do cmd_install "$p" "$h_v" "update"; done
             ;;
         check-update)  cmd_check_update ;;
-        rm)            cmd_remove "$2" "${3:-false}" ;;
-        list)          cmd_list ;;
-        doctor)        cmd_doctor ;;
         search)        cmd_search "${2:-}" ;;
         *)             die "Unknown command: $1" ;;
     esac
