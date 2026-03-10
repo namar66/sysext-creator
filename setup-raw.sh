@@ -122,7 +122,6 @@ sudo tee /etc/systemd/system/sysext-creator-heal.timer > /dev/null << 'EOF'
 Description=Spouští Healer 2 minuty po startu systému
 
 [Timer]
-# Počká 2 minuty po naběhnutí systému
 OnBootSec=2min
 Unit=sysext-creator-heal.service
 
@@ -133,7 +132,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now sysext-creator-heal.service
 
 sudo tee /etc/yum.repos.d/_copr_nadmartin-sysext-creator.repo > /dev/null << 'EOF'
-[copr:copr.fedorainfracloud.org:nadmartin:sysext-creator]
+[_copr_nadmartin-sysext-creator]
 name=Copr repo for sysext-creator owned by nadmartin
 baseurl=https://download.copr.fedorainfracloud.org/results/nadmartin/sysext-creator/fedora-$releasever-$basearch/
 type=rpm-md
