@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Sysext-Creator-Core (v1.6.1 - EN Edition)
+# Sysext-Creator-Core (v1.6.2 - EN Edition)
 # Runs exclusively inside the distrobox container.
 ################################################################################
 
@@ -207,6 +207,74 @@ cmd_list() {
     done
 }
 
+cmd_doctor() {
+    info "🩺 Starting diagnostics of installed images (Sysext Doctor)..."
+    local host_ver=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
+    local ext_count=0
+    local has_errors=0
+
+    for img in "$EXT_DIR"/*.raw; do
+        [ -e "$img" ] || continue
+        ((ext_count++))
+        local img_name=$(basename "$img" .raw)
+
+        echo "--------------------------------------------------------"
+        echo "🔍 Checking image: $img_name.raw"
+
+        # 1. LABEL AND VERSION CHECK
+        local release_file="usr/lib/extension-release.d/extension-release.${img_name}"
+        local img_ver=""
+
+        if ! distrobox-host-exec systemd-dissect --with "$img" cat "$release_file" >/dev/null 2>&1; then
+            err "❌ ERROR: Missing or incorrectly named release label!"
+            echo "   Expected path inside the image: /$release_file"
+            has_errors=1
+        else
+            img_ver=$(distrobox-host-exec systemd-dissect --with "$img" cat "$release_file" | grep "^VERSION_ID=" | cut -d'=' -f2)
+            if [[ "$img_ver" != "$host_ver" ]]; then
+                err "⚠️ WARNING: Image version ($img_ver) does not match the host ($host_ver)!"
+                has_errors=1
+            else
+                success "✅ Label and OS version ($img_ver) match."
+            fi
+        fi
+
+        # 2. BASE SYSTEM CONFLICT CHECK (Shadowing)
+        echo "🛠️ Scanning for conflicts with the base system (shadowing)..."
+        local conflicts=0
+
+        # Get a list of all files in the image (filtering only /usr/bin, /usr/sbin, /usr/lib)
+        local files_to_check=$(distrobox-host-exec systemd-dissect --list "$img" | grep -E '^/usr/(bin|sbin|lib/systemd)/')
+
+        for file in $files_to_check; do
+            # Ask the host RPM database if this file is already owned by the base OS
+            if distrobox-host-exec rpm -qf "$file" >/dev/null 2>&1; then
+                # If it's a real file and not just a directory, report a conflict
+                if ! distrobox-host-exec test -d "$file"; then
+                    err "   ⚠️ CONFLICT DETECTED: $file (already exists in the base system!)"
+                    ((conflicts++))
+                fi
+            fi
+        done
+
+        if [[ $conflicts -eq 0 ]]; then
+            success "✅ No conflicts with the base system found."
+        else
+            err "❌ Found a total of $conflicts conflicting file(s)."
+            has_errors=1
+        fi
+    done
+
+    echo "--------------------------------------------------------"
+    if [[ $ext_count -eq 0 ]]; then
+        status "No installed images found for diagnostics."
+    elif [[ $has_errors -eq 0 ]]; then
+        success "🎉 Diagnostics completed. All images are in 100% perfect condition!"
+    else
+        err "⚠️ Diagnostics completed, but issues were found. Please fix them, or the system extensions might not work properly."
+    fi
+}
+
 cmd_remove() {
     local pkg="$1"
     local force_all="${2:-false}"
@@ -329,6 +397,7 @@ main() {
         check-update)  cmd_check_update ;;
         rm)            cmd_remove "$2" "${3:-false}" ;;
         list)          cmd_list ;;
+        doctor)        cmd_doctor ;;
         search)        cmd_search "${2:-}" ;;
         *)             die "Unknown command: $1" ;;
     esac
