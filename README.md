@@ -60,6 +60,10 @@ sysext-creator update
 ```Bash
 sysext-creator rm <package_name>
 ```
+# check installed sysext images
+```Bash
+sysext-creator doctor
+```
 🧹 Uninstallation
 # Stop services
 ```Bash
