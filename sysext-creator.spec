@@ -1,6 +1,6 @@
 Name:           sysext-creator
-Version:        1.6.1
-Release:        2%{?dist}
+Version:        1.6.2
+Release:        1%{?dist}
 Summary:        Správce systémových rozšíření pro Fedoru Kinoite/Silverblue
 
 License:        MIT
@@ -100,6 +100,9 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/*.desktop
 %{_datadir}/kio/servicemenus/sysext-install.desktop
 
 %changelog
+* Tue Mar 10 2026 Martin Naď <namar66@gmail.com> - 1.6.2-1
+- add basic inspect function doctor
+
 * Mon Mar 09 2026 Martin Naď <namar66@gmail.com> - 1.6.1-1
 - fix bugs
 * Mon Mar 09 2026 Martin Naď <namar66@gmail.com> - 1.6.0-1
