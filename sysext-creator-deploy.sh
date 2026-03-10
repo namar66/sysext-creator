@@ -74,14 +74,60 @@ for raw_file in "$STAGING_DIR"/*.raw; do
     [[ ! -s "$raw_file" ]] && { rm -f "$raw_file"; continue; }
 
     pkg_file=$(basename "$raw_file")
-    log "Deploying new extension: $pkg_file"
+    ext_name="${pkg_file%.raw}"
+    log "Validating new extension before deployment: $pkg_file"
 
-    # OPRAVA: Použití cp a rm místo mv zamezí varováním s rootless namespaces
+    # --- PŘEDLETOVÁ KONTROLA (Pre-flight Gatekeeper) ---
+    validation_failed=0
+
+    # 1. Kontrola strukturální integrity
+    if ! systemd-dissect --validate "$raw_file" >/dev/null 2>&1; then
+        err "Validation failed: $pkg_file is corrupted or invalid format."
+        validation_failed=1
+    fi
+
+    # 2. Kontrola verze OS v hlavičce
+    if [[ $validation_failed -eq 0 ]]; then
+        host_ver=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
+        release_path="/usr/lib/extension-release.d/extension-release.${ext_name}"
+        img_ver=$(systemd-dissect --copy-from "$raw_file" "$release_path" - 2>/dev/null | grep "^VERSION_ID=" | cut -d'=' -f2 | tr -d '"' || true)
+        
+        if [[ "$img_ver" != "$host_ver" ]]; then
+            err "Validation failed: $pkg_file OS version mismatch (Image: $img_ver, Host: $host_ver)."
+            validation_failed=1
+        fi
+    fi
+
+    # 3. Kontrola konfliktů se základním systémem (Shadowing)
+    if [[ $validation_failed -eq 0 ]]; then
+        files_to_check=$(systemd-dissect --list "$raw_file" 2>/dev/null | grep -E '^/?usr/(bin|sbin|lib/systemd)/' || true)
+        for file in $files_to_check; do
+            abs_file="$file"
+            [[ "$abs_file" != /* ]] && abs_file="/$abs_file"
+            # Pokud soubor existuje v RPM databázi hostitele a není to jen složka
+            if rpm -qf "$abs_file" >/dev/null 2>&1 && ! test -d "$abs_file"; then
+                err "Validation failed: $pkg_file conflicts with base system file $abs_file"
+                validation_failed=1
+                break
+            fi
+        done
+    fi
+
+    # Pokud kontrola selhala, obraz smažeme a přeskočíme ho
+    if [[ $validation_failed -eq 1 ]]; then
+        err "Rejecting $pkg_file due to validation errors. Image was deleted."
+        rm -f "$raw_file"
+        continue
+    fi
+    # ---------------------------------------------------
+
+    log "Validation passed. Deploying extension: $pkg_file"
+
     if cp "$raw_file" "$EXT_DIR/" && rm -f "$raw_file"; then
         chmod 0644 "$EXT_DIR/$pkg_file"
-     if command -v restorecon >/dev/null 2>&1; then
+        if command -v restorecon >/dev/null 2>&1; then
             restorecon "$EXT_DIR/$pkg_file" || err "Failed to restorecon $pkg_file"
-     fi
+        fi
         REFRESH_NEEDED=1
     else
         err "Failed to deploy $pkg_file"
