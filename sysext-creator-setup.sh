@@ -27,6 +27,10 @@ if [[ "${1:-}" == "uninstall" ]]; then
     rm -f "$HOME/.local/share/icons/hicolor/512x512/apps/sysext-creator-icon.png"
     rm -f "$HOME/.local/share/kservices5/ServiceMenus/sysext-creator-install.desktop"
     rm -f "$HOME/.local/share/bash-completion/completions/sysext-creator"
+    if command -v kbuildsycoca6 &> /dev/null; then
+    kbuildsycoca6 &>/dev/null || true
+    echo "✅ KDE menu aktualizováno."
+    fi
     if command -v update-desktop-database &> /dev/null; then
         update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
     fi
@@ -120,34 +124,15 @@ cp "$SCRIPT_DIR/sysext-creator-core.sh" "$HOME/.local/bin/sysext-creator-core"
 cp "$SCRIPT_DIR/sysext-creator.sh" "$HOME/.local/bin/sysext-creator"
 chmod +x "$HOME/.local/bin/sysext-creator-core" "$HOME/.local/bin/sysext-creator"
 
-echo "=> Setting up GUI application..."
-cp "$SCRIPT_DIR/sysext-gui" "$HOME/.local/bin/"
-chmod +x "$HOME/.local/bin/sysext-gui"
-
-echo "=> Installing desktop entry and icon..."
-mkdir -p "$HOME/.local/share/applications"
-mkdir -p "$HOME/.local/share/icons/hicolor/512x512/apps"
-
-cp "$SCRIPT_DIR/sysext-creator-icon.png" "$HOME/.local/share/icons/hicolor/512x512/apps/"
-cp "$SCRIPT_DIR/sysext-creator.desktop" "$HOME/.local/share/applications/"
-if command -v update-desktop-database &> /dev/null; then
-    update-desktop-database "$HOME/.local/share/applications" || true
-fi
-
-echo "=> Checking distrobox and podman..."
-if ! command -v distrobox &> /dev/null; then
-    echo "=> Distrobox not found. Installing locally..."
-    curl -s https://raw.githubusercontent.com/89luca89/distrobox/main/install | sh -s -- -p ~/.local/bin/
-fi
-
+echo "=> Checking installed podman..."
 if ! command -v podman &> /dev/null; then
-    echo "❌ Error: Podman is required. Please install it with 'rpm-ostree install podman' and reboot."
+    echo "❌ Error: Podman is required. Run on a atomic version of Fedora."
     exit 1
 fi
 
 if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] || pgrep -x plasmashell > /dev/null; then
     echo "=> Prostředí KDE detekováno. Přidávám kontextové menu do Dolphinu..."
-    SERVICE_DIR="$HOME/.local/share/kservices5/ServiceMenus"
+    SERVICE_DIR="$HOME/.local/share/kio/servicemenus/"
     mkdir -p "$SERVICE_DIR"
 
     cat << 'EOF' > "$SERVICE_DIR/sysext-creator-install.desktop"
@@ -162,9 +147,27 @@ Name=Instalovat jako Systémové Rozšíření (Sysext)
 Icon=sysext-creator-icon
 Exec=sysext-creator install-local "%u"
 EOF
+
     echo "✅ Akce pro .rpm soubory úspěšně přidána."
+    sysext-creator install python3-pyqt6
+    echo "=> Setting up GUI application..."
+    cp "$SCRIPT_DIR/sysext-gui" "$HOME/.local/bin/"
+    chmod +x "$HOME/.local/bin/sysext-gui"
+
+    echo "=> Installing desktop entry and icon..."
+    mkdir -p "$HOME/.local/share/applications"
+    mkdir -p "$HOME/.local/share/icons/hicolor/512x512/apps"
+    cp "$SCRIPT_DIR/sysext-creator-icon.png" "$HOME/.local/share/icons/hicolor/512x512/apps/"
+    cp "$SCRIPT_DIR/sysext-creator.desktop" "$HOME/.local/share/applications/"
+    if command -v kbuildsycoca6 &> /dev/null; then
+    kbuildsycoca6 &>/dev/null || true
+    echo "✅ KDE menu aktualizováno."
+    fi
+    if command -v update-desktop-database &> /dev/null; then
+     update-desktop-database "$HOME/.local/share/applications" || true
+   fi
 else
-    echo "=> Prostředí KDE nebylo detekováno (běžíte pravděpodobně na GNOME/Silverblue). Přeskakuji integraci Dolphinu."
+    echo "=> Prostředí KDE nebylo detekováno (běžíte pravděpodobně na GNOME/Silverblue). Instaluji pouze CLI verzi."
 fi
 
 echo "=> Konfiguruji automatické doplňování pro Bash..."
