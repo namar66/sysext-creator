@@ -43,7 +43,17 @@ for req_file in "$STAGING_DIR"/*.version-req; do
     chmod 0666 "$res_file" 2>/dev/null || true
     rm -f "$req_file"
 done
-
+# ======================================================================
+# B.2 EXTRAKCE KONFIGURACE (/etc)
+# ======================================================================
+for etc_tar in "$STAGING_DIR"/*.etc.tar.gz; do
+    [[ ! -s "$etc_tar" ]] && { rm -f "$etc_tar"; continue; }
+    pkg_file=$(basename "$etc_tar")
+    log "Extracting /etc configuration from: $pkg_file"
+    # Rozbalíme obsah přesně do /etc/ a smažeme archiv
+    tar -xzf "$etc_tar" -C /etc/ 2>/dev/null || err "Failed to extract $etc_tar"
+    rm -f "$etc_tar"
+done
 # ======================================================================
 # B. ČIŠTĚNÍ KONFIGURACE (/etc)
 # ======================================================================
