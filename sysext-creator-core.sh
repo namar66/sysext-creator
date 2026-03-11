@@ -117,6 +117,13 @@ cmd_install() {
 cmd_install_local() {
     local rpm_path="$1" host_version="$2"
 
+    # --- KOUZLO 2.0: Autodetekce cesty z hostitele ---
+    if [[ ! -f "$rpm_path" && -f "/run/host${rpm_path}" ]]; then
+        info "Translating host path to container path..."
+        rpm_path="/run/host${rpm_path}"
+    fi
+    # -------------------------------------------------
+
     [[ ! -f "$rpm_path" ]] && die "File not found: $rpm_path"
 
     info "Analyzing local file..."
