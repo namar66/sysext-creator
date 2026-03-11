@@ -108,7 +108,7 @@ else
     fail "Démon nechal poškozený soubor ve Staging složce!"; 
 fi
 
-if sudo grep -q "Validation failed: poisoned-fc43.raw is corrupted" "$LOG_FILE"; then
+if grep -q "Validation failed: poisoned-fc43.raw is corrupted" "$LOG_FILE"; then
     pass "Záchyt poškozeného souboru byl správně zaznamenán v lozích."
 else
     fail "V logu chybí záznam o odmítnutí poškozeného souboru."
