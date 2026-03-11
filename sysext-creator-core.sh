@@ -9,8 +9,6 @@ set -euo pipefail
 
 readonly EXT_DIR="/var/lib/extensions"
 readonly STAGING_DIR="/var/tmp/sysext-staging"
-readonly STATE_DIR="$HOME/.local/state/sysext-creator"
-readonly TRACKER_FILE="${STATE_DIR}/etc_tracker.txt"
 
 readonly REQUIRED_CMDS=("mkfs.erofs" "cpio" "rpm2cpio" "repoquery")
 readonly SPECIAL_PACKAGES=("sysext-creator")
@@ -164,9 +162,9 @@ process_extension() {
         info "Processing configuration files from /etc..."
         tar -czf "$WORKDIR/${package}.etc.tar.gz" -C "$WORKDIR/etc" .
         mv "$WORKDIR/${package}.etc.tar.gz" "$STAGING_DIR/"
-        mkdir -p "$STATE_DIR"
-        echo "######## $package ########" >> "$TRACKER_FILE"
-        find "$WORKDIR/etc" -type f | sed "s|$WORKDIR||" >> "$TRACKER_FILE"
+        
+        # Novinka: Tracker pošleme rovnou do Stagingu k démonovi
+        find "$WORKDIR/etc" -type f | sed "s|$WORKDIR||" > "$STAGING_DIR/${package}.etc.tracker"
         rm -rf "$WORKDIR/etc"
     fi
 
