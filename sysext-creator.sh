@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Sysext-Creator Wrapper (v2.0.0 - Pure Podman Edition)
+# Sysext-Creator Wrapper (v2.0 - Pure Podman Edition)
 ################################################################################
 
 set -euo pipefail
@@ -78,7 +78,7 @@ get_installed_version() {
 cmd_list() {
     echo "=> Listing installed system extensions:"
     local packages=$(find "/var/lib/extensions" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | sed 's/-fc[0-9]\+$//' | sort -u | tr -d '\r')
-    
+
     if [[ -z "$packages" ]]; then
         echo "📋 No packages are installed."
         return 0
@@ -93,7 +93,7 @@ cmd_list() {
 
 cmd_remove() {
     local pkg="$1"
-    local force_all="${2:-false}"
+    local auto_yes="${2:-}"
 
     if [[ "$pkg" == "sysext-creator" || "$pkg" == "sysext-creator-kinoite" ]]; then
         echo "❌ Error: This tool cannot be removed with the regular rm command."
@@ -106,15 +106,44 @@ cmd_remove() {
         return 0
     fi
 
-    echo "=> Requesting daemon to remove extension $pkg..."
-    
-    # Místo složitého parsování trackeru jen pošleme démonovi tajné heslo
-    if [[ "$force_all" == "yes" || "$force_all" == "true" ]]; then
-        echo "FORCE_ETC_CLEANUP" > "$STAGING_DIR/${pkg}.delete"
-    else
-        touch "$STAGING_DIR/${pkg}.delete"
+    local tracker_file="/var/lib/sysext-creator/trackers/${pkg}.etc.tracker"
+    local del_payload=""
+
+    if [[ -f "$tracker_file" ]]; then
+        if [[ "$auto_yes" == "yes" || "$auto_yes" == "true" ]]; then
+            del_payload="FORCE_ETC_CLEANUP\n"
+        else
+            echo -e "\n📦 Balíček '$pkg' vytvořil tyto konfigurační soubory:"
+            while IFS= read -r f; do
+                echo "  📄 $f"
+            done < "$tracker_file"
+            echo ""
+
+            read -p "Chceš je také trvale smazat? [Y(vše) / N(nic) / S(vybrat ručně)]: " choice
+            case "${choice,,}" in
+                y|yes)
+                    del_payload="FORCE_ETC_CLEANUP\n"
+                    ;;
+                s|select)
+                    del_payload="SELECTED_ETC_CLEANUP\n"
+                    echo "=> Vybírání souborů ke smazání:"
+                    while IFS= read -r f; do
+                        # OPRAVA BASH PASTI: čteme přímo z terminálu, nikoliv z tracker souboru
+                        read -p "  🗑️ Smazat $f? [y/N]: " subchoice </dev/tty
+                        if [[ "${subchoice,,}" == "y" ]]; then
+                            del_payload="${del_payload}${f}\n"
+                        fi
+                    done < "$tracker_file"
+                    ;;
+                *)
+                    echo "=> Ponechávám konfigurační soubory v systému (/etc/)."
+                    ;;
+            esac
+        fi
     fi
 
+    echo "=> Requesting daemon to remove extension $pkg..."
+    echo -e "$del_payload" > "$STAGING_DIR/${pkg}.delete"
     echo "✅ Removal request for package $pkg was sent."
 }
 
@@ -153,7 +182,7 @@ check_container() {
 
     if [[ $recreate -eq 1 ]]; then
         echo "=> Starting build of persistent Podman container $CONTAINER_NAME..."
-        
+
         podman run -d --name "$CONTAINER_NAME" \
             --privileged \
             -v "$STAGING_DIR":"$STAGING_DIR":rw \
