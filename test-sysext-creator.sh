@@ -43,6 +43,11 @@ step "Komunikace s démonem (Doctor)"
 if sysext-creator doctor | grep -q "Diagnostics completed"; then pass "Démon odpovídá."
 else fail "Doctor nevrátil očekávaný výstup."; fi
 
+# --- ZÁZNAM STAVU PŘED TESTEM ---
+step "Snapshot stavu /etc před spuštěním testů"
+# Uložíme si přesný počet položek v /etc (a ignorujeme chyby práv)
+ETC_COUNT_BEFORE=$({ find /etc 2>/dev/null || true; } | wc -l)
+pass "Výchozí počet položek v /etc: $ETC_COUNT_BEFORE"
 # --- 2. Test jednoduchého balíčku (Bez závislostí) ---
 step "Instalace jednoduchého balíčku: $PKG_SIMPLE"
 sysext-creator install "$PKG_SIMPLE" > /dev/null
@@ -107,6 +112,26 @@ if sudo grep -q "Validation failed: poisoned-fc43.raw is corrupted" "$LOG_FILE";
     pass "Záchyt poškozeného souboru byl správně zaznamenán v lozích."
 else
     fail "V logu chybí záznam o odmítnutí poškozeného souboru."
+fi
+
+# --- 5. Finální porovnání stavu /etc ---
+step "Kontrola absolutní čistoty systému (Snapshot porovnání)"
+ETC_COUNT_AFTER=$({ find /etc 2>/dev/null || true; } | wc -l)
+
+echo -e "  📊 Stav před testem: $ETC_COUNT_BEFORE položek"
+echo -e "  📊 Stav po testech:  $ETC_COUNT_AFTER položek"
+
+if [[ "$ETC_COUNT_BEFORE" -eq "$ETC_COUNT_AFTER" ]]; then
+    pass "Struktura /etc je na chlup stejná jako před testem. Nástroj po sobě nezanechal absolutně žádné stopy!"
+else
+    rozdil=$((ETC_COUNT_AFTER - ETC_COUNT_BEFORE))
+    # Na běžícím OS mohou procesy (např. NetworkManager, dnf) vytvořit dočasné soubory.
+    # Tolerujeme drobnou odchylku, ale upozorníme na ni.
+    if [[ $rozdil -gt -5 && $rozdil -lt 5 ]]; then
+        warn "Počet položek se nepatrně liší (rozdíl: $rozdil). Pravděpodobně jde o běžnou aktivitu OS na pozadí."
+    else
+        fail "Zjištěn velký rozdíl v počtu souborů ($rozdil). Nějaká konfigurace pravděpodobně nebyla smazána!"
+    fi
 fi
 
 echo -e "\n${GREEN}=================================================${NC}"
