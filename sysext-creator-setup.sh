@@ -25,7 +25,7 @@ if [[ "${1:-}" == "uninstall" ]]; then
     echo "=> Odstraňuji integraci do plochy, menu a doplňování terminálu..."
     rm -f "$HOME/.local/share/applications/sysext-creator.desktop"
     rm -f "$HOME/.local/share/icons/hicolor/512x512/apps/sysext-creator-icon.png"
-    rm -f "$HOME/.local/share/kservices5/ServiceMenus/sysext-creator-install.desktop"
+    rm -f "$HOME/.local/share/share/kio/servicemenus/sysext-creator-install.desktop"
     rm -f "$HOME/.local/share/bash-completion/completions/sysext-creator"
     rm -f "$HOME/.local/bin/test-sysext-creator"
     if command -v kbuildsycoca6 &> /dev/null; then
@@ -135,20 +135,8 @@ if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] || pgrep -x plasmashell > /dev/nu
     echo "=> Prostředí KDE detekováno. Přidávám kontextové menu do Dolphinu..."
     SERVICE_DIR="$HOME/.local/share/kio/servicemenus/"
     mkdir -p "$SERVICE_DIR"
-
-    cat << 'EOF' > "$SERVICE_DIR/sysext-creator-install.desktop"
-[Desktop Entry]
-Type=Service
-MimeType=application/x-rpm;
-Actions=installExtension;
-X-KDE-Priority=TopLevel
-
-[Desktop Action installExtension]
-Name=Instalovat jako Systémové Rozšíření (Sysext)
-Icon=sysext-creator-icon
-Exec=sysext-creator install-local "%u"
-EOF
-
+    cp "$SCRIPT_DIR/sysext-creator-install.desktop "$HOME/.local/share/share/kio/servicemenus/sysext-creator-install.desktop"
+    chmod +x "$HOME/.local/share/share/kio/servicemenus/sysext-creator-install.desktop"
     echo "✅ Akce pro .rpm soubory úspěšně přidána."
     sysext-creator install python3-pyqt6
     echo "=> Setting up GUI application..."
