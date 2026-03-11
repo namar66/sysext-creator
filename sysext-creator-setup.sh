@@ -135,7 +135,7 @@ if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] || pgrep -x plasmashell > /dev/nu
     echo "=> Prostředí KDE detekováno. Přidávám kontextové menu do Dolphinu..."
     SERVICE_DIR="$HOME/.local/share/kio/servicemenus/"
     mkdir -p "$SERVICE_DIR"
-    cp "$SCRIPT_DIR/sysext-creator-install.desktop "$HOME/.local/share/share/kio/servicemenus/sysext-creator-install.desktop"
+    cp "$SCRIPT_DIR/sysext-creator-install.desktop" "$HOME/.local/share/share/kio/servicemenus/sysext-creator-install.desktop"
     chmod +x "$HOME/.local/share/share/kio/servicemenus/sysext-creator-install.desktop"
     echo "✅ Akce pro .rpm soubory úspěšně přidána."
     sysext-creator install python3-pyqt6
