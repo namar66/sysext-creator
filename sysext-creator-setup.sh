@@ -27,7 +27,7 @@ if [[ "${1:-}" == "uninstall" ]]; then
     rm -f "$HOME/.local/share/icons/hicolor/512x512/apps/sysext-creator-icon.png"
     rm -f "$HOME/.local/share/kservices5/ServiceMenus/sysext-creator-install.desktop"
     rm -f "$HOME/.local/share/bash-completion/completions/sysext-creator"
-    rm -f "$HOME/.local/bin/sysext-creator-test"
+    rm -f "$HOME/.local/bin/test-sysext-creator"
     if command -v kbuildsycoca6 &> /dev/null; then
     kbuildsycoca6 &>/dev/null || true
     echo "✅ KDE menu aktualizováno."
@@ -183,8 +183,8 @@ else
 fi
 # ---------- NOVÁ ČÁST PRO TESTY ----------
 echo "=> Kopíruji nástroj pro integrační testy..."
-cp "$SCRIPT_DIR/sysext-creator-test" "$HOME/.local/bin/"
-chmod +x "$HOME/.local/bin/sysext-creator-test"
+cp "$SCRIPT_DIR/test-sysext-creator.sh" "$HOME/.local/bin/test-sysext-creator"
+chmod +x "$HOME/.local/bin/test-sysext-creator"
 
 echo -e "\n================================================================================"
 echo "✅ Instalace Sysext-Creator (v2.0) byla úspěšně dokončena!"
@@ -193,7 +193,7 @@ echo "⏳ Spouštím automatickou diagnostiku a zkoušku ohněm (E2E Test)..."
 echo "Během testu se na pozadí vytvoří a zase smažou zkušební balíčky."
 
 # Spuštění samotného testu
-sysext-creator-test
+test-sysext-creator
 
 echo -e "\nPokud testy prošly zeleně, systém je připraven k použití."
 #echo "Pro nápovědu napiš: sysext-creator --help"
