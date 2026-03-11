@@ -97,7 +97,6 @@ cmd_remove() {
 
     if [[ "$pkg" == "sysext-creator" || "$pkg" == "sysext-creator-kinoite" ]]; then
         echo "❌ Error: This tool cannot be removed with the regular rm command."
-        echo "   For complete and safe removal, use the setup script with 'uninstall'."
         exit 1
     fi
 
@@ -108,12 +107,12 @@ cmd_remove() {
     fi
 
     echo "=> Requesting daemon to remove extension $pkg..."
-    touch "$STAGING_DIR/${pkg}.delete"
-
-    local TRACKER_FILE="$HOME/.local/state/sysext-creator/etc_tracker.txt"
-    if [[ "$force_all" == "yes" && -f "$TRACKER_FILE" ]]; then
-        echo "=> Extracting configuration files list for $pkg from tracker..."
-        awk "/^######## $pkg ########/{flag=1; next} /^########/{flag=0} flag" "$TRACKER_FILE" > "$STAGING_DIR/${pkg}.etc.remove"
+    
+    # Místo složitého parsování trackeru jen pošleme démonovi tajné heslo
+    if [[ "$force_all" == "yes" || "$force_all" == "true" ]]; then
+        echo "FORCE_ETC_CLEANUP" > "$STAGING_DIR/${pkg}.delete"
+    else
+        touch "$STAGING_DIR/${pkg}.delete"
     fi
 
     echo "✅ Removal request for package $pkg was sent."
