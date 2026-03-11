@@ -55,13 +55,13 @@ I18N = {
         "op_completed": "✅ {} Completed",
         "btn_doctor": "🩺 Run Doctor",
         "doctor_title": "🩺 System Diagnostics (Sysext Doctor)",
-        "doctor_init": "Starting diagnostics. Please wait for the password prompt...",
+        "doctor_init": "Starting diagnostics. Analyzing system in the background...",
         "doctor_success": "✅ Diagnostics completed.",
-        "doctor_cancel": "❌ Action cancelled by user (missing permissions).",
-        "doctor_cancel_msg": "Administrator password is required to run diagnostics.",
+        "doctor_cancel": "❌ Action cancelled by user.",
+        "doctor_cancel_msg": "Diagnostics were interrupted.",
         "doctor_warning": "⚠️ Diagnostics found issues in the system.",
         "doctor_critical": "❌ Critical error: Tool not found.",
-        "doctor_critical_msg": "Cannot find 'pkexec' or 'sysext-creator'.",
+        "doctor_critical_msg": "Cannot find 'sysext-creator'.",
         "btn_close": "Close"
     },
     "cs": {
@@ -99,13 +99,13 @@ I18N = {
         "op_completed": "✅ {} dokončena",
         "btn_doctor": "🩺 Diagnostika (Doctor)",
         "doctor_title": "🩺 Diagnostika systému (Sysext Doctor)",
-        "doctor_init": "Spouštím diagnostiku. Vyčkejte na zobrazení výzvy pro zadání hesla...",
+        "doctor_init": "Spouštím diagnostiku. Systém se analyzuje na pozadí...",
         "doctor_success": "✅ Diagnostika byla dokončena.",
-        "doctor_cancel": "❌ Akce byla zrušena uživatelem (chybí oprávnění).",
-        "doctor_cancel_msg": "Pro spuštění diagnostiky je nutné zadat heslo administrátora.",
+        "doctor_cancel": "❌ Akce byla zrušena.",
+        "doctor_cancel_msg": "Diagnostika byla přerušena.",
         "doctor_warning": "⚠️ Diagnostika nalezla problémy v systému.",
         "doctor_critical": "❌ Kritická chyba: Nástroj nebyl nalezen.",
-        "doctor_critical_msg": "Nelze najít 'pkexec' nebo 'sysext-creator'.",
+        "doctor_critical_msg": "Nelze najít nástroj 'sysext-creator'.",
         "btn_close": "Zavřít"
     }
 }
@@ -220,8 +220,10 @@ class DoctorWorker(QThread):
 
     def run(self):
         try:
+            # OPRAVA 2.0: Odstraněno 'pkexec'. Diagnostika běží nativně jako uživatel
+            # a komunikuje s root démonem přes staging složku.
             process = subprocess.run(
-                ["pkexec", "sysext-creator", "doctor"],
+                ["sysext-creator", "doctor"],
                 capture_output=True,
                 text=True
             )
