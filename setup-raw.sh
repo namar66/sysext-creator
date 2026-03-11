@@ -59,15 +59,6 @@ echo "=> Nastavuji automatické aktualizace..."
 systemctl --user daemon-reload
 systemctl --user enable --now sysext-update.timer
 
-echo "=> Obnovuji mezipaměť ikon a zástupců plochy..."
-if command -v kbuildsycoca6 &> /dev/null; then
-    kbuildsycoca6 &>/dev/null || true
-    echo "✅ KDE menu aktualizováno."
-fi
-if command -v update-desktop-database &> /dev/null; then
-    update-desktop-database ~/.local/share/applications || true
-fi
-
 echo "=> Kontroluji Distrobox kontejner..."
 /usr/bin/sysext-creator list > /dev/null 2>&1 || true
 
@@ -145,9 +136,27 @@ enabled=1
 enabled_metadata=1
 exclude=*.src*
 EOF
+if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] || pgrep -x plasmashell > /dev/null; then
+    echo "=> KDE environment detected. Installing dependencies for GUI python3-pyqt6 as a sysext image..."
+    sysext-creator install python3-pyqt6
 
+    if command -v kbuildsycoca6 &> /dev/null; then
+    kbuildsycoca6 &>/dev/null || true
+    echo "✅ KDE menu aktualizováno."
+    fi
+fi
 echo "✅ Auto-Healer je aktivní. Nástroj nyní přežije upgrady systému."
 echo "--------------------------------------------------------"
 echo "✅ Aktivace dokončena!"
 echo "📦 Nyní můžete Sysext-Creator spustit z menu aplikací."
+echo "⏳ Spouštím automatickou diagnostiku a zkoušku ohněm (E2E Test)..."
+echo "Během testu se na pozadí vytvoří a zase smažou zkušební balíčky."
+
+# Spuštění samotného testu
+test-sysext-creator
+
+echo -e "\nPokud testy prošly zeleně, systém je připraven k použití."
 echo "--------------------------------------------------------"
+echo -e "\n================================================================================"
+echo "✅ Instalace Sysext-Creator (v2.0) byla úspěšně dokončena!"
+echo "================================================================================"
