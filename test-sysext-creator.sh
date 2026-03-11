@@ -5,7 +5,7 @@
 # ======================================================================
 set -euo pipefail
 
-PKG_SIMPLE="tree"
+PKG_SIMPLE="distrobox"
 PKG_COMPLEX="mc"
 LOG_FILE="/var/log/sysext-creator.log"
 EXT_DIR="/var/lib/extensions"
@@ -26,7 +26,7 @@ warn() { echo -e "${YELLOW}⚠️ WARN:${NC} $1"; }
 # --- 0. Pre-flight Checks ---
 step "Kontrola prostředí"
 if ! command -v sysext-creator &> /dev/null; then fail "sysext-creator chybí v PATH."; fi
-if ! systemctl is-active --quiet sysext-creator-deploy.service; then fail "Démon neběží!"; fi
+if ! systemctl is-active --quiet sysext-creator-deploy.path; then fail "Démon neběží!"; fi
 pass "Nástroj i démon jsou připraveny."
 
 # Vyčištění před testem
