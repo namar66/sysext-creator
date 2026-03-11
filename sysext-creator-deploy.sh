@@ -3,9 +3,11 @@ set -euo pipefail
 
 STAGING_DIR="/var/tmp/sysext-staging"
 EXT_DIR="/var/lib/extensions"
+TRACKER_DIR="/var/lib/sysext-creator/trackers"
 LOG_FILE="/var/log/sysext-creator.log"
 REFRESH_NEEDED=0
 
+mkdir -p "$TRACKER_DIR"
 shopt -s nullglob
 shopt -s dotglob
 
@@ -44,23 +46,36 @@ for req_file in "$STAGING_DIR"/*.version-req; do
     rm -f "$req_file"
 done
 # ======================================================================
-# B.2 EXTRAKCE KONFIGURACE (/etc)
+# B. ZPRACOVÁNÍ TRACKERŮ A MAZÁNÍ OBRAZŮ
 # ======================================================================
-for etc_tar in "$STAGING_DIR"/*.etc.tar.gz; do
-    [[ ! -s "$etc_tar" ]] && { rm -f "$etc_tar"; continue; }
-    pkg_file=$(basename "$etc_tar")
-    log "Extracting /etc configuration from: $pkg_file"
-    # Rozbalíme obsah přesně do /etc/ a smažeme archiv
-    tar -xzf "$etc_tar" -C /etc/ 2>/dev/null || err "Failed to extract $etc_tar"
-    rm -f "$etc_tar"
+# 1. Uložení nových trackerů do naší vlastní čisté složky
+for tracker in "$STAGING_DIR"/*.etc.tracker; do
+    [[ ! -f "$tracker" ]] && continue
+    pkg_file=$(basename "$tracker")
+    mv "$tracker" "$TRACKER_DIR/$pkg_file"
+    chmod 0644 "$TRACKER_DIR/$pkg_file"
 done
-# ======================================================================
-# B. ČIŠTĚNÍ KONFIGURACE (/etc)
-# ======================================================================
-for etc_rm in "$STAGING_DIR"/*.etc.remove; do
-    [[ ! -s "$etc_rm" ]] && { rm -f "$etc_rm"; continue; }
-    while IFS= read -r f; do [[ "$f" == /etc/* && "$f" != *..* ]] && rm -f "$f"; done < "$etc_rm"
-    rm -f "$etc_rm"
+
+# 2. Mazání obrazů a vyčištění /etc
+for del_file in "$STAGING_DIR"/*.delete; do
+    pkg_name=$(basename "$del_file" .delete)
+    [[ -z "$pkg_name" || "$pkg_name" == "*" ]] && { rm -f "$del_file"; continue; }
+
+    log "Removing extension: $pkg_name"
+    rm -f "$EXT_DIR/${pkg_name}-fc"*.raw "$EXT_DIR/${pkg_name}.raw"
+
+    # Deep cleanup pro /etc (čte z naší nové složky)
+    local_tracker="$TRACKER_DIR/${pkg_name}.etc.tracker"
+    if grep -q "FORCE_ETC_CLEANUP" "$del_file" 2>/dev/null && [[ -f "$local_tracker" ]]; then
+        log "Deep cleaning /etc configuration for $pkg_name..."
+        while IFS= read -r f; do 
+            [[ "$f" == /etc/* && "$f" != *..* ]] && rm -f "$f"
+        done < "$local_tracker"
+        rm -f "$local_tracker"
+    fi
+
+    rm -f "$del_file"
+    REFRESH_NEEDED=1
 done
 
 # ======================================================================
