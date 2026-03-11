@@ -31,7 +31,7 @@ for req_file in "$STAGING_DIR"/*.version-req; do
     if [[ -n "$raw_file" && -f "$raw_file" ]]; then
         ext_name=$(basename "$raw_file" .raw)
         ver=$(systemd-dissect --copy-from "$raw_file" "/usr/lib/extension-release.d/extension-release.${ext_name}" - 2>/dev/null | grep "^SYSEXT_VERSION_ID=" | cut -d'=' -f2 | tr -d '"' || true)
-        
+
         if [[ -n "$ver" ]]; then
             echo "$ver" > "$res_file"
         else
@@ -40,7 +40,7 @@ for req_file in "$STAGING_DIR"/*.version-req; do
     else
         echo "unknown" > "$res_file"
     fi
-    
+
     chmod 0666 "$res_file" 2>/dev/null || true
     rm -f "$req_file"
 done
@@ -62,13 +62,29 @@ for del_file in "$STAGING_DIR"/*.delete; do
     log "Removing extension: $pkg_name"
     rm -f "$EXT_DIR/${pkg_name}-fc"*.raw "$EXT_DIR/${pkg_name}.raw"
 
-    # Deep cleanup pro /etc
     local_tracker="$TRACKER_DIR/${pkg_name}.etc.tracker"
+
+    # Deep cleanup pro /etc
     if grep -q "FORCE_ETC_CLEANUP" "$del_file" 2>/dev/null && [[ -f "$local_tracker" ]]; then
-        log "Deep cleaning /etc configuration for $pkg_name..."
-        while IFS= read -r f; do 
+        log "Deep cleaning ALL /etc configuration for $pkg_name..."
+        while IFS= read -r f; do
             [[ "$f" == /etc/* && "$f" != *..* ]] && rm -f "$f"
         done < "$local_tracker"
+        rm -f "$local_tracker"
+
+        while IFS= read -r d; do
+            [[ "$d" == /etc/* ]] && rmdir --ignore-fail-on-non-empty "$d" 2>/dev/null || true
+        done < <(sed 's|/[^/]*$||' "$local_tracker" | sort -ru)
+
+    elif grep -q "SELECTED_ETC_CLEANUP" "$del_file" 2>/dev/null; then
+        log "Deep cleaning SELECTED /etc configuration for $pkg_name..."
+        while IFS= read -r f; do
+            [[ "$f" == /etc/* && "$f" != *..* ]] && rm -f "$f"
+        done < "$del_file"
+        rm -f "$local_tracker"
+
+    else
+        # Pokud uživatel zvolil N (nic nemazat), nebo to byl jednoduchý balíček bez trackeru.
         rm -f "$local_tracker"
     fi
 
@@ -108,7 +124,7 @@ for raw_file in "$STAGING_DIR"/*.raw; do
         host_ver=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
         release_path="/usr/lib/extension-release.d/extension-release.${ext_name}"
         img_ver=$(systemd-dissect --copy-from "$raw_file" "$release_path" - 2>/dev/null | grep "^VERSION_ID=" | cut -d'=' -f2 | tr -d '"' || true)
-        
+
         if [[ "$img_ver" != "$host_ver" ]]; then
             err "Validation failed: $pkg_file OS version mismatch (Image: $img_ver, Host: $host_ver)."
             validation_failed=1
@@ -174,7 +190,7 @@ if [[ -f "$STAGING_DIR/doctor.req" ]]; then
                 img_name=$(basename "$img" .raw)
                 echo "--------------------------------------------------------"
                 echo "🔍 Checking image: $img_name.raw"
-                
+
                 if ! systemd-dissect --validate "$img" >/dev/null 2>&1; then
                     echo "❌ ERROR: Image structure is corrupted or invalid!"
                     has_errors=1
@@ -200,7 +216,7 @@ if [[ -f "$STAGING_DIR/doctor.req" ]]; then
                 echo "🛠️  Scanning for conflicts with the base system (shadowing)..."
                 conflicts=0
                 files_to_check=$(systemd-dissect --list "$img" 2>/dev/null | grep -E '^/?usr/(bin|sbin|lib/systemd)/' || true)
-                
+
                 if [[ -n "$files_to_check" ]]; then
                     for file in $files_to_check; do
                         abs_file="$file"
