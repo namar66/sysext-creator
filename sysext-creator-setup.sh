@@ -59,7 +59,7 @@ fi
 # ==========================================
 # INSTALL LOGIKA
 # ==========================================
-echo "🚀 Starting Sysext-Creator environment setup (v1.5.0)..."
+echo "🚀 Starting Sysext-Creator environment setup (v2.0)..."
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 HOST_VERSION=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
