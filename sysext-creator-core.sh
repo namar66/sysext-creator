@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Sysext-Creator-Core (v2.0.0 - Pure Podman Edition)
+# Sysext-Creator-Core (v2.0 - Pure Podman Edition)
 # Runs exclusively inside the persistent podman container.
 ################################################################################
 
@@ -164,7 +164,7 @@ process_extension() {
         mv "$WORKDIR/${package}.etc.tar.gz" "$STAGING_DIR/"
         
         # Novinka: Tracker pošleme rovnou do Stagingu k démonovi
-        find "$WORKDIR/etc" -type f | sed "s|$WORKDIR||" > "$STAGING_DIR/${package}.etc.tracker"
+        find "$WORKDIR/etc" ! -type d | sed "s|$WORKDIR||" > "$STAGING_DIR/${package}.etc.tracker"
         rm -rf "$WORKDIR/etc"
     fi
 
