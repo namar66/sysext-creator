@@ -7,7 +7,9 @@ TRACKER_DIR="/var/lib/sysext-creator/trackers"
 LOG_FILE="/var/log/sysext-creator.log"
 REFRESH_NEEDED=0
 
+# Zajistíme, že složka existuje
 mkdir -p "$TRACKER_DIR"
+
 shopt -s nullglob
 shopt -s dotglob
 
@@ -23,16 +25,13 @@ for req_file in "$STAGING_DIR"/*.version-req; do
 
     res_file="$STAGING_DIR/${pkg_name}.version-res"
 
-    # Bezpečné hledání bez `ls`
     files=("$EXT_DIR"/${pkg_name}-fc*.raw "$EXT_DIR"/${pkg_name}.raw)
     raw_file="${files[0]:-}"
 
     if [[ -n "$raw_file" && -f "$raw_file" ]]; then
         ext_name=$(basename "$raw_file" .raw)
-
-        # OPRAVA: Použití --copy-from místo cat a ochrana přes || true proti pádu démona
         ver=$(systemd-dissect --copy-from "$raw_file" "/usr/lib/extension-release.d/extension-release.${ext_name}" - 2>/dev/null | grep "^SYSEXT_VERSION_ID=" | cut -d'=' -f2 | tr -d '"' || true)
-
+        
         if [[ -n "$ver" ]]; then
             echo "$ver" > "$res_file"
         else
@@ -41,14 +40,14 @@ for req_file in "$STAGING_DIR"/*.version-req; do
     else
         echo "unknown" > "$res_file"
     fi
-
+    
     chmod 0666 "$res_file" 2>/dev/null || true
     rm -f "$req_file"
 done
+
 # ======================================================================
 # B. ZPRACOVÁNÍ TRACKERŮ A MAZÁNÍ OBRAZŮ
 # ======================================================================
-# 1. Uložení nových trackerů do naší vlastní čisté složky
 for tracker in "$STAGING_DIR"/*.etc.tracker; do
     [[ ! -f "$tracker" ]] && continue
     pkg_file=$(basename "$tracker")
@@ -56,7 +55,6 @@ for tracker in "$STAGING_DIR"/*.etc.tracker; do
     chmod 0644 "$TRACKER_DIR/$pkg_file"
 done
 
-# 2. Mazání obrazů a vyčištění /etc
 for del_file in "$STAGING_DIR"/*.delete; do
     pkg_name=$(basename "$del_file" .delete)
     [[ -z "$pkg_name" || "$pkg_name" == "*" ]] && { rm -f "$del_file"; continue; }
@@ -64,7 +62,7 @@ for del_file in "$STAGING_DIR"/*.delete; do
     log "Removing extension: $pkg_name"
     rm -f "$EXT_DIR/${pkg_name}-fc"*.raw "$EXT_DIR/${pkg_name}.raw"
 
-    # Deep cleanup pro /etc (čte z naší nové složky)
+    # Deep cleanup pro /etc
     local_tracker="$TRACKER_DIR/${pkg_name}.etc.tracker"
     if grep -q "FORCE_ETC_CLEANUP" "$del_file" 2>/dev/null && [[ -f "$local_tracker" ]]; then
         log "Deep cleaning /etc configuration for $pkg_name..."
@@ -79,17 +77,14 @@ for del_file in "$STAGING_DIR"/*.delete; do
 done
 
 # ======================================================================
-# C. MAZÁNÍ OBRAZŮ
+# C. EXTRAKCE KONFIGURACE (/etc)
 # ======================================================================
-for del_file in "$STAGING_DIR"/*.delete; do
-    pkg_name=$(basename "$del_file" .delete)
-    [[ -z "$pkg_name" || "$pkg_name" == "*" ]] && { rm -f "$del_file"; continue; }
-
-    log "Removing extension: $pkg_name"
-    # Smažeme všechny varianty daného rozšíření (s verzí i bez)
-    rm -f "$EXT_DIR/${pkg_name}-fc"*.raw "$EXT_DIR/${pkg_name}.raw"
-    rm -f "$del_file"
-    REFRESH_NEEDED=1
+for etc_tar in "$STAGING_DIR"/*.etc.tar.gz; do
+    [[ ! -s "$etc_tar" ]] && { rm -f "$etc_tar"; continue; }
+    pkg_file=$(basename "$etc_tar")
+    log "Extracting /etc configuration from: $pkg_file"
+    tar -xzf "$etc_tar" -C /etc/ 2>/dev/null || err "Failed to extract $etc_tar"
+    rm -f "$etc_tar"
 done
 
 # ======================================================================
@@ -102,16 +97,13 @@ for raw_file in "$STAGING_DIR"/*.raw; do
     ext_name="${pkg_file%.raw}"
     log "Validating new extension before deployment: $pkg_file"
 
-    # --- PŘEDLETOVÁ KONTROLA (Pre-flight Gatekeeper) ---
     validation_failed=0
 
-    # 1. Kontrola strukturální integrity
     if ! systemd-dissect --validate "$raw_file" >/dev/null 2>&1; then
         err "Validation failed: $pkg_file is corrupted or invalid format."
         validation_failed=1
     fi
 
-    # 2. Kontrola verze OS v hlavičce
     if [[ $validation_failed -eq 0 ]]; then
         host_ver=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
         release_path="/usr/lib/extension-release.d/extension-release.${ext_name}"
@@ -123,13 +115,11 @@ for raw_file in "$STAGING_DIR"/*.raw; do
         fi
     fi
 
-    # 3. Kontrola konfliktů se základním systémem (Shadowing)
     if [[ $validation_failed -eq 0 ]]; then
         files_to_check=$(systemd-dissect --list "$raw_file" 2>/dev/null | grep -E '^/?usr/(bin|sbin|lib/systemd)/' || true)
         for file in $files_to_check; do
             abs_file="$file"
             [[ "$abs_file" != /* ]] && abs_file="/$abs_file"
-            # Pokud soubor existuje v RPM databázi hostitele a není to jen složka
             if rpm -qf "$abs_file" >/dev/null 2>&1 && ! test -d "$abs_file"; then
                 err "Validation failed: $pkg_file conflicts with base system file $abs_file"
                 validation_failed=1
@@ -138,13 +128,11 @@ for raw_file in "$STAGING_DIR"/*.raw; do
         done
     fi
 
-    # Pokud kontrola selhala, obraz smažeme a přeskočíme ho
     if [[ $validation_failed -eq 1 ]]; then
         err "Rejecting $pkg_file due to validation errors. Image was deleted."
         rm -f "$raw_file"
         continue
     fi
-    # ---------------------------------------------------
 
     log "Validation passed. Deploying extension: $pkg_file"
 
@@ -168,7 +156,7 @@ if [[ $REFRESH_NEEDED -eq 1 ]]; then
 fi
 
 # ======================================================================
-# F. DIAGNOSTIKA (DOCTOR) - Běží pod rootem, bez hesla
+# F. DIAGNOSTIKA (DOCTOR)
 # ======================================================================
 if [[ -f "$STAGING_DIR/doctor.req" ]]; then
     log "Running Sysext Doctor diagnostics..."
@@ -176,7 +164,6 @@ if [[ -f "$STAGING_DIR/doctor.req" ]]; then
     host_ver=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
     has_errors=0
 
-    # Veškerý výstup chytíme rovnou do výsledkového souboru pro GUI
     {
         files=("$EXT_DIR"/*.raw)
         if [[ ${#files[@]} -eq 0 || ! -f "${files[0]}" ]]; then
@@ -187,8 +174,7 @@ if [[ -f "$STAGING_DIR/doctor.req" ]]; then
                 img_name=$(basename "$img" .raw)
                 echo "--------------------------------------------------------"
                 echo "🔍 Checking image: $img_name.raw"
-
-                # 1. STRUCTURAL INTEGRITY CHECK
+                
                 if ! systemd-dissect --validate "$img" >/dev/null 2>&1; then
                     echo "❌ ERROR: Image structure is corrupted or invalid!"
                     has_errors=1
@@ -197,14 +183,12 @@ if [[ -f "$STAGING_DIR/doctor.req" ]]; then
                     echo "✅ Image structure and format are valid."
                 fi
 
-                # 2. LABEL AND VERSION CHECK
                 release_file="usr/lib/extension-release.d/extension-release.${img_name}"
                 if ! systemd-dissect --copy-from "$img" "/$release_file" - >/dev/null 2>&1; then
                     echo "❌ ERROR: Missing or incorrectly named release label!"
-                    echo "   Expected path inside the image: /$release_file"
                     has_errors=1
                 else
-                    img_ver=$(systemd-dissect --copy-from "$img" "/$release_file" - 2>/dev/null | grep "^VERSION_ID=" | cut -d'=' -f2 || true)
+                    img_ver=$(systemd-dissect --copy-from "$img" "/$release_file" - 2>/dev/null | grep "^VERSION_ID=" | cut -d'=' -f2 | tr -d '"' || true)
                     if [[ "$img_ver" != "$host_ver" ]]; then
                         echo "⚠️  WARNING: Image version ($img_ver) does not match the host ($host_ver)!"
                         has_errors=1
@@ -213,11 +197,10 @@ if [[ -f "$STAGING_DIR/doctor.req" ]]; then
                     fi
                 fi
 
-                # 3. BASE SYSTEM CONFLICT CHECK
                 echo "🛠️  Scanning for conflicts with the base system (shadowing)..."
                 conflicts=0
                 files_to_check=$(systemd-dissect --list "$img" 2>/dev/null | grep -E '^/?usr/(bin|sbin|lib/systemd)/' || true)
-
+                
                 if [[ -n "$files_to_check" ]]; then
                     for file in $files_to_check; do
                         abs_file="$file"
@@ -251,3 +234,5 @@ if [[ -f "$STAGING_DIR/doctor.req" ]]; then
     chmod 0666 "$res_file" 2>/dev/null || true
     rm -f "$STAGING_DIR/doctor.req"
 fi
+
+exit 0
