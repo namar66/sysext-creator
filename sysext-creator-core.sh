@@ -114,6 +114,16 @@ cmd_install() {
     info "Downloading and extracting RPM packages..."
     dnf download $deps --refresh --forcearch="$(uname -m)" --exclude="*.i686" --destdir="$WORKDIR/rpms" >/dev/null
     for rpm in "$WORKDIR/rpms"/*.rpm; do rpm2cpio "$rpm" | cpio -idm -D "$WORKDIR" --quiet 2>/dev/null; done
+    info "Resolving base system conflicts (Smart Pruning)..."
+    find "$WORKDIR/usr" \( -type f -o -type l \) 2>/dev/null | while read -r filepath; do
+        # Získáme cestu tak, jak by vypadala na hostiteli (přidáme /run/host)
+        host_path="/run/host${filepath#$WORKDIR}"
+        
+        # Pokud soubor nebo symlink už na hostiteli existuje, z rozšíření ho vymažeme
+        if [[ -e "$host_path" ]]; then
+            rm -f "$filepath"
+        fi
+    done
 
     process_extension "$package" "$host_version" "$available_v" "$mode"
 }
