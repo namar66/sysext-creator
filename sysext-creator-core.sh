@@ -70,17 +70,6 @@ get_available_version() { dnf repoquery --latest-limit=1 --queryformat "%{versio
 cmd_install() {
     local package="$1" host_version="$2" mode="${3:-install}"
 
-    if [[ " ${SPECIAL_PACKAGES[*]} " =~ " ${package} " ]]; then
-        if [[ "$package" == "sysext-creator" ]]; then
-            if grep -iq "kinoite" /run/host/etc/os-release || [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]]; then
-                info "Special package detected: Switching to sysext-creator-kinoite (GUI)"
-                package="sysext-creator-kinoite"
-            else
-                info "Special package detected: Keeping sysext-creator (Core)"
-            fi
-        fi
-    fi
-
     [[ "$package" =~ ^($(IFS='|'; echo "${BLACKLIST[*]}"))$ ]] && die "Installation of '$package' is blocked (blacklist)."
 
     local installed_v=$(get_installed_version "$package")
@@ -105,6 +94,21 @@ cmd_install() {
 
     info "Reading resolved dependencies from host tunnel..."
     local deps="${RESOLVED_DEPS:-}"
+
+    # --- LOGIKA PRO SPECIAL PACKAGES (Přesunuto sem dolů!) ---
+    if [[ " ${SPECIAL_PACKAGES[*]} " =~ " ${package} " ]]; then
+        if [[ "$package" == "sysext-creator" ]]; then
+            if grep -iq "kinoite" /run/host/etc/os-release || [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]]; then
+                info "Special package detected: Adding GUI subpackage for KDE (kinoite)"
+                deps="sysext-creator sysext-creator-kinoite"
+            else
+                info "Special package detected: Keeping sysext-creator (Core only)"
+                deps="sysext-creator"
+            fi
+        fi
+    fi
+    # ---------------------------------------------------------
+
     [[ -z "$deps" || "$deps" == " " ]] && deps="$package"
 
     info "Downloading and extracting RPM packages..."
@@ -169,7 +173,7 @@ process_extension() {
         info "Processing configuration files from /etc..."
         tar -czf "$WORKDIR/${package}.etc.tar.gz" -C "$WORKDIR/etc" .
         mv "$WORKDIR/${package}.etc.tar.gz" "$STAGING_DIR/"
-        
+
         # Novinka: Tracker pošleme rovnou do Stagingu k démonovi
         find "$WORKDIR/etc" ! -type d | sed "s|$WORKDIR||" > "$STAGING_DIR/${package}.etc.tracker"
         rm -rf "$WORKDIR/etc"
