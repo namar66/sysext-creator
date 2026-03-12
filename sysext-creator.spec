@@ -1,3 +1,4 @@
+%bcond_without deps
 Name:           sysext-creator
 Version:        2.0.0
 Release:        1%{?dist}
@@ -22,9 +23,10 @@ rozšíření (systemd-sysext) pomocí kontejnerů Distrobox.
 %package kinoite
 Summary: GUI for sysext-creator
 BuildArch:      noarch
+%if %{with deps}
 Requires:       python3-pyqt6
 Requires: %{name} = %{version}-%{release}
-
+%endif
 %description kinoite
 This package contains KDE GUI integration
 %prep
