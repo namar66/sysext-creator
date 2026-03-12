@@ -172,7 +172,7 @@ fi
 # ---------- NOVÁ ČÁST PRO TESTY ----------
 echo "=> Kopíruji nástroj pro integrační testy..."
 cp "$SCRIPT_DIR/sysext-creator-test.sh" "$HOME/.local/bin/sysext-creator-test"
-chmod +x "$HOME/.local/bin/test-sysext-creator"
+chmod +x "$HOME/.local/bin/sysext-creator-test"
 
 echo -e "\n================================================================================"
 echo "✅ Instalace Sysext-Creator (v2.0) byla úspěšně dokončena!"
