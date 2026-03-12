@@ -44,6 +44,7 @@ install -D -m 755 sysext-creator-core.sh %{buildroot}%{_bindir}/sysext-creator-c
 install -D -m 755 sysext-gui %{buildroot}%{_bindir}/sysext-gui
 install -D -m 755 setup-raw.sh %{buildroot}%{_bindir}/sysext-creator-setup
 install -D -m 755 sysext-gui-wrapper-gui.sh %{buildroot}%{_bindir}/sysext-gui-wrapper
+install -D -m 755 sysext-creator-test.sh %{buildroot}%{_bindir}/sysext-creator-test
 # 2. DÉMON (Logika pro práva roota)
 # Standardně démoni nepatří do /usr/bin, ale do libexec
 install -D -m 755 sysext-creator-deploy.sh %{buildroot}%{_libexecdir}/%{name}/sysext-creator-deploy
@@ -88,6 +89,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/*.desktop
 %{_bindir}/sysext-creator
 %{_bindir}/sysext-creator-core
 %{_bindir}/sysext-creator-setup
+%{_bindir}/sysext-creator-test
 %{_libexecdir}/%{name}/sysext-creator-deploy
 %{_unitdir}/sysext-creator-deploy.service
 %{_unitdir}/sysext-creator-deploy.path
