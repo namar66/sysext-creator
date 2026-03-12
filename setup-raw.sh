@@ -153,7 +153,7 @@ echo "⏳ Spouštím automatickou diagnostiku a zkoušku ohněm (E2E Test)..."
 echo "Během testu se na pozadí vytvoří a zase smažou zkušební balíčky."
 
 # Spuštění samotného testu
-test-sysext-creator
+sysext-creator-test
 
 echo -e "\nPokud testy prošly zeleně, systém je připraven k použití."
 echo "--------------------------------------------------------"
