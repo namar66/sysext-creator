@@ -12,11 +12,11 @@ build_image() {
     local variant="$2"
 
     local img_base_name="sysext-creator"
-    local pkgs="sysext-creator distrobox"
+    local pkgs="sysext-creator"
 
     if [[ "$variant" == "kinoite" ]]; then
         img_base_name="sysext-creator-kinoite"
-        pkgs="sysext-creator-kinoite sysext-creator iio-sensor-proxy python-pyqt6-rpm-macros python3-pyqt6 python3-pyqt6-base python3-pyqt6-sip qt6-qtremoteobjects qt6-qtsensors qt6-qttools-libs-designer qt6-qttools-libs-help distrobox"
+        pkgs="sysext-creator-kinoite sysext-creator"
     fi
 
     local full_name="${img_base_name}-fc${fver}"
