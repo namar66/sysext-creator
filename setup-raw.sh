@@ -73,17 +73,25 @@ if [ -f "$RAW_FILE" ]; then
     echo "Healer: Nástroj je aktuální pro FC${HOST_VER}. Není třeba zasahovat."
     exit 0
 fi
-# Seznam balíčků
-PKG="sysext-creator"
 
+# --- LOGIKA PRO GUI BALÍČEK (Aby Healer na Kinoite zachoval grafické rozhraní) ---
+if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] || pgrep -x plasmashell > /dev/null; then
+    PKG="sysext-creator sysext-creator-kinoite"
+else
+    PKG="sysext-creator"
+fi
+# -------------------------------------------------------------------------------
+
+# Podman spouštíme s namapovanými SELinux kontexty z hostitele pro bezpečný build na F44+
 podman run --rm --privileged \
     -v /var/lib/extensions:/ext_out \
+    -v /etc/selinux/targeted/contexts/files/file_contexts:/tmp/file_contexts:ro \
     "registry.fedoraproject.org/fedora:${HOST_VER}" \
     /bin/bash -x -c "
         mkdir -p /tmp/pkg /tmp/rootfs/usr/lib/extension-release.d && \
-        dnf install -y erofs-utils cpio selinux-policy-targeted --setopt=install_weak_deps=False && \
+        dnf install -y erofs-utils cpio --setopt=install_weak_deps=False && \
         dnf copr enable -y nadmartin/sysext-creator && \
-        dnf download --destdir=/tmp/pkg $PKG && \
+        dnf download --destdir=/tmp/pkg \$PKG && \
         echo 'ID=fedora' > /tmp/rootfs/usr/lib/extension-release.d/extension-release.sysext-creator-fc${HOST_VER} && \
         echo 'VERSION_ID=${HOST_VER}' >> /tmp/rootfs/usr/lib/extension-release.d/extension-release.sysext-creator-fc${HOST_VER} && \
         cd /tmp/rootfs && \
@@ -91,12 +99,12 @@ podman run --rm --privileged \
             rpm2cpio \$f | cpio -idmv
         done && \
         mkfs.erofs -zlz4hc --force-uid=0 --force-gid=0 \
-            --file-contexts=/etc/selinux/targeted/contexts/files/file_contexts \
+            --file-contexts=/tmp/file_contexts \
             /ext_out/sysext-creator-fc${HOST_VER}.raw /tmp/rootfs
     "
+
 sysext-creator update
 systemd-sysext refresh
-
 EOF
 
 sudo chmod +x /usr/local/bin/sysext-creator-healer
