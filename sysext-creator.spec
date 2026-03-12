@@ -37,32 +37,33 @@ This package contains KDE GUI integration
 rm -rf $RPM_BUILD_ROOT
 
 # 1. HLAVNÍ NÁSTROJE (Wrapper, Core, GUI)
-install -D -m 755 sysext-creator.sh $RPM_BUILD_ROOT%{_bindir}/sysext-creator
-install -D -m 755 sysext-creator-core.sh $RPM_BUILD_ROOT%{_bindir}/sysext-creator-core
-install -D -m 755 sysext-gui $RPM_BUILD_ROOT%{_bindir}/sysext-gui
-install -D -m 755 setup-raw.sh $RPM_BUILD_ROOT%{_bindir}/sysext-creator-setup
+install -D -m 755 sysext-creator.sh %{buildroot}%{_bindir}/sysext-creator
+install -D -m 755 sysext-creator-core.sh %{buildroot}%{_bindir}/sysext-creator-core
+install -D -m 755 sysext-gui %{buildroot}%{_bindir}/sysext-gui
+install -D -m 755 setup-raw.sh %{buildroot}%{_bindir}/sysext-creator-setup
+install -D -m 755 sysext-gui-wrapper-gui.sh %{buildroot}%{_bindir}/sysext-gui-wrapper
 # 2. DÉMON (Logika pro práva roota)
 # Standardně démoni nepatří do /usr/bin, ale do libexec
-install -D -m 755 sysext-creator-deploy.sh $RPM_BUILD_ROOT%{_libexecdir}/%{name}/sysext-creator-deploy
+install -D -m 755 sysext-creator-deploy.sh %{buildroot}%{_libexecdir}/%{name}/sysext-creator-deploy
 
 # 3. SYSTEMD UNITS (Musí jít do /usr/lib/systemd/..., NE do /etc/!)
-install -D -m 644 sysext-creator-deploy.service $RPM_BUILD_ROOT%{_unitdir}/sysext-creator-deploy.service
-install -D -m 644 sysext-creator-deploy.path $RPM_BUILD_ROOT%{_unitdir}/sysext-creator-deploy.path
+install -D -m 644 sysext-creator-deploy.service %{buildroot}%{_unitdir}/sysext-creator-deploy.service
+install -D -m 644 sysext-creator-deploy.path %{buildroot}%{_unitdir}/sysext-creator-deploy.path
 
 # 4. DESKTOP INTEGRACE
 # Zástupce pro GUI aplikaci
-install -D -m 644 sysext-creator.desktop $RPM_BUILD_ROOT%{_datadir}/applications/sysext-creator.desktop
+install -D -m 644 sysext-creator.desktop %{buildroot}%{_datadir}/applications/sysext-creator.desktop
 # Ikona do správné hicolor složky (aby ji KDE hned našlo i z .raw obrazu)
-install -D -m 644 sysext-creator-icon.png $RPM_BUILD_ROOT%{_datadir}/icons/hicolor/512x512/apps/sysext-creator-icon.png
+install -D -m 644 sysext-creator-icon.png %{buildroot}%{_datadir}/icons/hicolor/512x512/apps/sysext-creator-icon.png
 # Dolphin Service Menu
-install -D -m 644 sysext-install.desktop $RPM_BUILD_ROOT%{_datadir}/kio/servicemenus/sysext-install.desktop
+install -D -m 644 sysext-install.desktop %{buildroot}%{_datadir}/kio/servicemenus/sysext-install.desktop
 
 # 5. BASH COMPLETION
-install -D -m 644 bash-completion $RPM_BUILD_ROOT%{_datadir}/bash-completion/completions/sysext-creator
+install -D -m 644 bash-completion %{buildroot}%{_datadir}/bash-completion/completions/sysext-creator
 install -D -m 644 sysext-update.service $RPM_BUILD_ROOT/usr/lib/systemd/user/sysext-update.service
 install -D -m 644 sysext-update.timer $RPM_BUILD_ROOT/usr/lib/systemd/user/sysext-update.timer
 mkdir -p %{buildroot}%{_datadir}/metainfo
-cp sysext-creator.metainfo.xml %{buildroot}%{_metainfodir}
+install -D -m 644 sysext-creator.metainfo.xml %{buildroot}%{_metainfodir}
 
 %check
 appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/*.metainfo.xml
@@ -94,6 +95,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/*.desktop
 %{_metainfodir}/*.metainfo.xml
 %files kinoite
 %{_bindir}/sysext-gui
+%{_bindir}/sysext-gui-wrapper
 %{_datadir}/applications/sysext-creator.desktop
 %{_datadir}/icons/hicolor/512x512/apps/sysext-creator-icon.png
 %{_datadir}/kio/servicemenus/sysext-install.desktop
