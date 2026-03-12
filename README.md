@@ -72,7 +72,7 @@ sudo systemctl disable --now sysext-creator-deploy.path
 ```
 # Remove the extension
 ```Bash
-sudo rm /var/lib/extensions/sysext-creator.raw
+./sysext-creator-setup.sh uninstall
 sudo systemd-sysext refresh
 ```
 * 🤝 License
