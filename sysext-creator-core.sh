@@ -180,7 +180,7 @@ process_extension() {
     fi
 
     local raw_file="$WORKDIR/${ext_name}.raw"
-    mkfs.erofs -zlz4hc --force-uid=0 --force-gid=0 --file-contexts=/etc/selinux/targeted/contexts/files/file_contexts "$raw_file" "$WORKDIR" >/dev/null
+    mkfs.erofs -zlz4hc --force-uid=0 --force-gid=0 --file-contexts=/tmp/file_contexts "$raw_file" "$WORKDIR" >/dev/null
     mv "$raw_file" "$STAGING_DIR/"
 
     success "Extension $ext_name was successfully dispatched to daemon for deployment."
