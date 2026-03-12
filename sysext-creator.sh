@@ -195,7 +195,7 @@ check_container() {
             sleep infinity >/dev/null
 
         echo "=> Installing required dependencies inside the container..."
-        podman exec "$CONTAINER_NAME" dnf install -y erofs-utils cpio dnf-utils selinux-policy-targeted
+        podman exec "$CONTAINER_NAME" dnf install -y erofs-utils cpio dnf-utils
         echo "✅ Container successfully restored and ready!"
     fi
 }
