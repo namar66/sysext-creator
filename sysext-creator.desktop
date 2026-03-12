@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=Sysext-Creator
 Comment=Správa systémových rozšíření pro atomickou Fedoru
-Exec=sysext-gui
+Exec=sysext-gui-wrapper-gui
 Icon=sysext-creator-icon
 Terminal=false
 Type=Application
