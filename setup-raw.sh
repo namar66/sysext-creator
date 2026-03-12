@@ -27,7 +27,7 @@ if [[ "${1:-}" == "uninstall" ]]; then
         sudo rm -f /var/lib/extensions/*.raw
     else
         echo "=> Odstraňuji pouze Sysext-Creator..."
-        sudo rm -f /var/lib/extensions/sysext-creator-fc*.raw
+        sudo rm -f /var/lib/extensions/sysext-creator*.raw
         sudo rm -f /var/lib/extensions/sysext-creator.raw 2>/dev/null || true
     fi
 
@@ -67,12 +67,14 @@ echo "=> Instaluji Auto-Healer (záchranný modul pro přežití upgradu OS)..."
 sudo tee /usr/local/bin/sysext-creator-healer > /dev/null << 'EOF'
 #!/bin/bash
 HOST_VER=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
+RAW_FILE="/var/lib/extensions/sysext-creator-fc${HOST_VER}.raw"
 
+if [ -f "$RAW_FILE" ]; then
+    echo "Healer: Nástroj je aktuální pro FC${HOST_VER}. Není třeba zasahovat."
+    exit 0
+fi
 # Seznam balíčků
 PKG="sysext-creator"
-if grep -iq "kinoite" /etc/os-release || [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]]; then
-    PKG="sysext-creator-kinoite sysext-creator iio-sensor-proxy python-pyqt6-rpm-macros python3-pyqt6 python3-pyqt6-base python3-pyqt6-sip qt6-qtremoteobjects qt6-qtsensors qt6-qttools-libs-designer qt6-qttools-libs-help"
-fi
 
 podman run --rm --privileged \
     -v /var/lib/extensions:/ext_out \
@@ -81,7 +83,7 @@ podman run --rm --privileged \
         mkdir -p /tmp/pkg /tmp/rootfs/usr/lib/extension-release.d && \
         dnf install -y erofs-utils cpio selinux-policy-targeted --setopt=install_weak_deps=False && \
         dnf copr enable -y nadmartin/sysext-creator && \
-        dnf download --destdir=/tmp/pkg $PKG distrobox && \
+        dnf download --destdir=/tmp/pkg $PKG && \
         echo 'ID=fedora' > /tmp/rootfs/usr/lib/extension-release.d/extension-release.sysext-creator-fc${HOST_VER} && \
         echo 'VERSION_ID=${HOST_VER}' >> /tmp/rootfs/usr/lib/extension-release.d/extension-release.sysext-creator-fc${HOST_VER} && \
         cd /tmp/rootfs && \
@@ -92,6 +94,7 @@ podman run --rm --privileged \
             --file-contexts=/etc/selinux/targeted/contexts/files/file_contexts \
             /ext_out/sysext-creator-fc${HOST_VER}.raw /tmp/rootfs
     "
+sysext-creator update
 systemd-sysext refresh
 
 EOF
@@ -121,7 +124,7 @@ Unit=sysext-creator-heal.service
 WantedBy=timers.target
 EOF
 sudo systemctl daemon-reload
-sudo systemctl enable --now sysext-creator-heal.service
+sudo systemctl enable --now sysext-creator-heal.timer
 
 sudo tee /etc/yum.repos.d/_copr_nadmartin-sysext-creator.repo > /dev/null << 'EOF'
 [copr:copr.fedorainfracloud.org:nadmartin:sysext-creator]
