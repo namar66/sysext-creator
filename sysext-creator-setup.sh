@@ -27,7 +27,7 @@ if [[ "${1:-}" == "uninstall" ]]; then
     rm -f "$HOME/.local/share/icons/hicolor/512x512/apps/sysext-creator-icon.png"
     rm -f "$HOME/.local/share/kio/servicemenus/sysext-creator-install.desktop"
     rm -f "$HOME/.local/share/bash-completion/completions/sysext-creator"
-    rm -f "$HOME/.local/bin/test-sysext-creator"
+    rm -f "$HOME/.local/bin/sysext-creator-test"
     if command -v kbuildsycoca6 &> /dev/null; then
     kbuildsycoca6 &>/dev/null || true
     echo "✅ KDE menu aktualizováno."
