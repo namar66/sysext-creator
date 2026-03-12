@@ -187,6 +187,7 @@ check_container() {
             --privileged \
             -v "$STAGING_DIR":"$STAGING_DIR":rw \
             -v "/var/lib/extensions:/var/lib/extensions:ro" \
+            -v /etc/selinux/targeted/contexts/files/file_contexts:/tmp/file_contexts:ro \
             -v "/etc/yum.repos.d:/etc/yum.repos.d:ro" \
             -v "/:/run/host:ro" \
             -v "/run/dbus/system_bus_socket:/run/dbus/system_bus_socket" \
