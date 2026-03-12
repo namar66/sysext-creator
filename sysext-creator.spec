@@ -59,7 +59,7 @@ install -D -m 644 sysext-creator.desktop %{buildroot}%{_datadir}/applications/sy
 # Ikona do správné hicolor složky (aby ji KDE hned našlo i z .raw obrazu)
 install -D -m 644 sysext-creator-icon.png %{buildroot}%{_datadir}/icons/hicolor/512x512/apps/sysext-creator-icon.png
 # Dolphin Service Menu
-install -D -m 644 sysext-install.desktop %{buildroot}%{_datadir}/kio/servicemenus/sysext-install.desktop
+install -D -m 644 sysext-creator-install.desktop %{buildroot}%{_datadir}/kio/servicemenus/sysext-creator-install.desktop
 
 # 5. BASH COMPLETION
 install -D -m 644 bash-completion %{buildroot}%{_datadir}/bash-completion/completions/sysext-creator
@@ -102,7 +102,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/*.desktop
 %{_bindir}/sysext-gui-wrapper
 %{_datadir}/applications/sysext-creator.desktop
 %{_datadir}/icons/hicolor/512x512/apps/sysext-creator-icon.png
-%{_datadir}/kio/servicemenus/sysext-install.desktop
+%{_datadir}/kio/servicemenus/sysext-creator-install.desktop
 
 %changelog
 * Tue Mar 10 2026 Martin Naď <namar66@gmail.com> - 2.0.0-1
