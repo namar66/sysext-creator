@@ -141,7 +141,8 @@ if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] || pgrep -x plasmashell > /dev/nu
     sysext-creator install python3-pyqt6
     echo "=> Setting up GUI application..."
     cp "$SCRIPT_DIR/sysext-gui" "$HOME/.local/bin/"
-    chmod +x "$HOME/.local/bin/sysext-gui"
+    cp "$SCRIPT_DIR/sysext-gui-wrapper-gui.sh" "$HOME/.local/bin/sysext-gui-wrapper-gui"
+    chmod +x "$HOME/.local/bin/sysext-gui" "$HOME/.local/bin/sysext-gui-wrapper-gui"
 
     echo "=> Installing desktop entry and icon..."
     mkdir -p "$HOME/.local/share/applications"
