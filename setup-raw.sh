@@ -137,9 +137,6 @@ enabled_metadata=1
 exclude=*.src*
 EOF
 if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] || pgrep -x plasmashell > /dev/null; then
-    echo "=> KDE environment detected. Installing dependencies for GUI python3-pyqt6 as a sysext image..."
-    sysext-creator install python3-pyqt6
-
     if command -v kbuildsycoca6 &> /dev/null; then
     kbuildsycoca6 &>/dev/null || true
     echo "✅ KDE menu aktualizováno."
