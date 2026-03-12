@@ -171,7 +171,7 @@ else
 fi
 # ---------- NOVÁ ČÁST PRO TESTY ----------
 echo "=> Kopíruji nástroj pro integrační testy..."
-cp "$SCRIPT_DIR/test-sysext-creator.sh" "$HOME/.local/bin/test-sysext-creator"
+cp "$SCRIPT_DIR/sysext-creator-test.sh" "$HOME/.local/bin/sysext-creator-test"
 chmod +x "$HOME/.local/bin/test-sysext-creator"
 
 echo -e "\n================================================================================"
@@ -181,7 +181,7 @@ echo "⏳ Spouštím automatickou diagnostiku a zkoušku ohněm (E2E Test)..."
 echo "Během testu se na pozadí vytvoří a zase smažou zkušební balíčky."
 
 # Spuštění samotného testu
-test-sysext-creator
+sysext-creator-test
 
 echo -e "\nPokud testy prošly zeleně, systém je připraven k použití."
 #echo "Pro nápovědu napiš: sysext-creator --help"
