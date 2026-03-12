@@ -1,23 +1,30 @@
-# 📦 Sysext-Creator: The Atomic App Store
+# 📦 Sysext-Creator (v2.0)
 
-**Sysext-Creator** is a native, container-backed package manager and GUI App Store designed specifically for **Fedora Atomic Desktops** (Kinoite, Silverblue, Sericea, etc.). 
+**Advanced system extension manager for atomic Fedora systems (Kinoite & Silverblue).**
 
-It allows you to install, update, and remove standard RPM packages as **Systemd System Extensions (`systemd-sysext`)** without layering them via `rpm-ostree` and without requiring system reboots.
+Sysext-Creator is a tool that allows you to install classic RPM packages and graphical applications using `systemd-sysext` technology. Instead of slow package layering via `rpm-ostree` which requires reboots, Sysext-Creator smartly wraps applications into fully isolated `.raw` images using **Podman**. 
+
+Your base system remains 100% clean, untouched, and lightning fast.
+
+---
 
 ## ✨ Key Features
 
-* **Zero Host Contamination:** Packages are downloaded, resolved, and packed into EROFS `.raw` images entirely inside a throwaway Distrobox container.
-* **Rootless GUI Experience:** The PyQt6 graphical interface runs as a standard user. Privilege escalation is handled securely via a `systemd.path` daemon.
-* **Native KDE Dolphin Integration:** Right-click any downloaded `.rpm` file and select *"Install as System Extension"*.
-* **SELinux Ready:** Images are built with native host SELinux file contexts, ensuring 100% compatibility with Fedora's security policies.
-* **Auto-Updates:** Includes a background systemd user timer that keeps all your extensions up to date with desktop notifications.
-* **Bilingual:** GUI automatically adapts to English or Czech based on your system locale.
+* 🐳 **Pure Podman Architecture:** Everything runs securely in an isolated container in the background. No Distrobox required, and no polluting the host system.
+* 🪄 **Auto-Healer:** Atomic systems suffer from old extensions breaking after a major OS upgrade (e.g., from Fedora 40 to 41). Sysext-Creator solves this! After a major update, it wakes up in the background, detects the new OS version specifically for the new host system.
+* 🖥️ **Full-featured GUI (Kinoite):** A beautiful, native, and secure Qt6 graphical interface (no need to enter a password via `pkexec`).
+* 🧩 **Local RPM Installation:** Downloaded an `.rpm` package from the internet? The tool smartly translates the path and installs it along with all necessary dependencies.
 
-## 🏗️ How It Works
+---
 
-1. **Frontend (`sysext-gui` / CLI):** Runs as a standard user.
-2. **Backend Container:** A Fedora distrobox spins up, downloads RPMs, and packs them into a compressed EROFS `.raw` image. 
-3. **Deployment Daemon:** A privileged root daemon detects the new file, moves it to `/var/lib/extensions`, and triggers a `systemd-sysext refresh`.
+## 🚀 Installation
+
+The tool is distributed via an official Copr repository. 
+
+**1. Add the Copr repository:**
+Since `dnf copr enable` cannot be used on atomic systems, download the repository manually:
+```bash
+sudo curl -Lo /etc/yum.repos.d/nadmartin-sysext-creator.repo [https://copr.fedorainfracloud.org/coprs/nadmartin/sysext-creator/repo/fedora-$(rpm](https://copr.fedorainfracloud.org/coprs/nadmartin/sysext-creator/repo/fedora-$(rpm) -E %fedora)/nadmartin-sysext-creator-fedora-$(rpm -E %fedora).repo
 
 ## 🚀 Quick Installation (Standalone RAW)
 
@@ -25,8 +32,8 @@ Sysext-Creator is distributed as a system extension itself!
 
 1. Download the latest `sysext-creator.raw` from the Releases page.
 2. Move it to the extensions directory:
+*(note be sure you have enabled systemd-sysext and properly created /var/lib/extensions)
 ```bash
-   sudo mkdir -p /var/lib/extensions
    sudo cp sysext-creator.raw /var/lib/extensions/
    sudo systemd-sysext refresh
  ```
@@ -34,6 +41,7 @@ Sysext-Creator is distributed as a system extension itself!
 
 ```Bash
 sysext-creator-setup
+sysext-creator update
 ```
 ## 🚀 Quick Installation (Standalone in $Home)
 ```Bash
@@ -52,6 +60,10 @@ sysext-creator search <keyword>
 ```Bash
 sysext-creator install <package_name>
 ```
+* local downloaded rpm package
+```Bash
+sysext-creator install <_path_package_rpm>
+```
 # Update all extensions
 ```Bash
 sysext-creator update
@@ -65,15 +77,13 @@ sysext-creator rm <package_name>
 sysext-creator doctor
 ```
 🧹 Uninstallation
-# Stop services
+# Uninstall (Standalone RAW)
 ```Bash
-systemctl --user stop sysext-update.timer sysext-update.service
-sudo systemctl disable --now sysext-creator-deploy.path
+sysext-creator-setup uninstall
 ```
-# Remove the extension
+# Uninstall (Standalone in $Home)
 ```Bash
 ./sysext-creator-setup.sh uninstall
-sudo systemd-sysext refresh
 ```
 * 🤝 License
 * GPLv2
