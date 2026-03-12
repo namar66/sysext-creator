@@ -19,13 +19,6 @@ Your base system remains 100% clean, untouched, and lightning fast.
 
 ## 🚀 Installation
 
-The tool is distributed via an official Copr repository. 
-
-**1. Add the Copr repository:**
-Since `dnf copr enable` cannot be used on atomic systems, download the repository manually:
-```bash
-sudo curl -Lo /etc/yum.repos.d/nadmartin-sysext-creator.repo [https://copr.fedorainfracloud.org/coprs/nadmartin/sysext-creator/repo/fedora-$(rpm](https://copr.fedorainfracloud.org/coprs/nadmartin/sysext-creator/repo/fedora-$(rpm) -E %fedora)/nadmartin-sysext-creator-fedora-$(rpm -E %fedora).repo
-
 ## 🚀 Quick Installation (Standalone RAW)
 
 Sysext-Creator is distributed as a system extension itself!
