@@ -25,11 +25,10 @@ sudo install -d -m 0755 -o 0 -g 0 "/var/lib/extensions"
 sudo restorecon -RFv "/var/lib/extensions"
 ```
 2. activate systemd-sysext.service
-
-## 🚀 Quick Installation (Standalone RAW)
 ```Bash
 sudo systemctl enable systemd-sysext.service
 ```
+## 🚀 Quick Installation (Standalone RAW)
 Sysext-Creator is distributed as a system extension itself!
 
 1. Download the latest `sysext-creator.raw` from the Releases page.
