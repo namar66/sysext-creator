@@ -67,16 +67,27 @@ step "Instalace komplexního balíčku: $PKG_COMPLEX (tunel + /etc)"
 sysext-creator install "$PKG_COMPLEX" > /dev/null
 sleep 5
 
+echo "=> Ověřuji dostupnost binárek a funkčnost závislostí..."
+
+# 1. Kontrola hlavního balíčku
 if command -v "$PKG_COMPLEX" &> /dev/null; then 
-    pass "Příkaz $PKG_COMPLEX funguje (závislosti se stáhly správně)."
+    pass "Příkaz $PKG_COMPLEX nalezen (hlavní balíček se nainstaloval)."
 else 
-    fail "Aplikace $PKG_COMPLEX selhala. Chybí závislosti?"; 
+    fail "Příkaz $PKG_COMPLEX nebyl nalezen. Instalace selhala!"
 fi
 
-if [[ -d "/etc/fake-complex" ]]; then 
-    pass "Konfigurace byla úspěšně zapsána do /etc/fake-complex."
+# 2. Kontrola závislosti (Tohle je ten nejdůležitější test!)
+if command -v "$PKG_SIMPLE" &> /dev/null; then 
+    pass "Příkaz $PKG_SIMPLE nalezen (řešení závislostí funguje na 100 %!)."
 else 
-    fail "Složka /etc/fake-complex chybí! Démon nerozbalil .etc.tar.gz archiv."; 
+    fail "Příkaz $PKG_SIMPLE nebyl nalezen. Závislosti se nestáhly nebo nesloučily do obrazu!"
+fi
+
+# 3. Kontrola atomického nasazení /etc (Když už to testujeme, tak pořádně)
+if [[ -f "/etc/fake-complex/config.conf" ]]; then
+    pass "Konfigurace v /etc se úspěšně nasadila (Démon funguje správně)."
+else
+    fail "Konfigurace v /etc chybí! Démon nerozbalil .tar.gz."
 fi
 
 step "Odstranění komplexního balíčku vč. konfigurace (Force Remove)"
