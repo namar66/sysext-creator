@@ -213,16 +213,22 @@ main() {
     local pkgs=$(find "/var/lib/extensions" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | sed 's/-fc[0-9]\+$//' | sort -u | tr -d '\r' | tr '\n' ' ' || true)
 
     case "$cmd" in
-        install)
-            local target="$2"
-            echo "=> Resolving dependencies via host system..."
-            local deps=$(resolve_deps "$target")
+       install|install-local)
+            local target="${2:-}"
+            [[ -z "$target" ]] && { echo "❌ Error: Please specify a package name or path."; exit 1; }
 
-            if [[ -f "$target" && "$target" == *.rpm ]]; then
+            # --- Vygenerování mapy hostitelského systému ---
+            echo "=> Vytvářím mapu hostitelského systému pro chytré prořezávání..."
+            find /usr \( -type f -o -type l \) 2>/dev/null > "$STAGING_DIR/host_usr_files.txt"
+            # --------------------------------------------------------
+
+            if [[ "$cmd" == "install-local" ]]; then
                 local abs_path=$(realpath "$target")
-                echo "=> Local package detected, starting offline installation..."
-                podman exec -e RESOLVED_DEPS="$deps" -i "$CONTAINER_NAME" "$CORE_EXEC" install-local "$abs_path"
+                # Zde nepotřebujeme resolve_deps z hostitele, kontejner si lokální RPM zanalyzuje sám
+                podman exec -i "$CONTAINER_NAME" "$CORE_EXEC" install-local "$abs_path"
             else
+                echo "=> Resolving dependencies for $target via host system..."
+                local deps=$(resolve_deps "$target")
                 podman exec -e RESOLVED_DEPS="$deps" -i "$CONTAINER_NAME" "$CORE_EXEC" install "$target"
             fi
             ;;
