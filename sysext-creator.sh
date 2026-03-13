@@ -214,23 +214,25 @@ main() {
 
     case "$cmd" in
        install|install-local)
-            local target="${2:-}"
-            [[ -z "$target" ]] && { echo "❌ Error: Please specify a package name or path."; exit 1; }
+            pkgs="${@:2}"
+            if [[ -z "$pkgs" || "$pkgs" == " " ]]; then
+                echo "❌ Error: Please specify a package name or path."
+                exit 1
+            fi
 
-            # --- Vygenerování mapy hostitelského systému ---
             echo "=> Vytvářím mapu hostitelského systému pro chytré prořezávání..."
             find /usr \( -type f -o -type l \) 2>/dev/null > "$STAGING_DIR/host_usr_files.txt"
-            # --------------------------------------------------------
 
-            if [[ "$cmd" == "install-local" ]]; then
-                local abs_path=$(realpath "$target")
-                # Zde nepotřebujeme resolve_deps z hostitele, kontejner si lokální RPM zanalyzuje sám
-                podman exec -i "$CONTAINER_NAME" "$CORE_EXEC" install-local "$abs_path"
-            else
-                echo "=> Resolving dependencies for $target via host system..."
-                local deps=$(resolve_deps "$target")
-                podman exec -e RESOLVED_DEPS="$deps" -i "$CONTAINER_NAME" "$CORE_EXEC" install "$target"
-            fi
+            for target in $pkgs; do
+                if [[ "$COMMAND" == "install-local" ]]; then
+                    abs_path=$(realpath "$target")
+                    podman exec -i "$CONTAINER_NAME" "$CORE_EXEC" install-local "$abs_path"
+                else
+                    echo "=> Resolving dependencies for $target via host system..."
+                    deps=$(resolve_deps "$target")
+                    podman exec -e RESOLVED_DEPS="$deps" -i "$CONTAINER_NAME" "$CORE_EXEC" install "$target"
+                fi
+            done
             ;;
         update)
             if [[ -z "$pkgs" || "$pkgs" == " " ]]; then
