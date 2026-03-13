@@ -221,7 +221,7 @@ main() {
             fi
 
             echo "=> Vytvářím mapu hostitelského systému pro chytré prořezávání..."
-            find /usr \( -type f -o -type l \) 2>/dev/null > "$STAGING_DIR/host_usr_files.txt"
+            rpm -qal 2>/dev/null | grep '^/usr/' > "$STAGING_DIR/host_usr_files.txt" || true
 
             for target in $pkgs; do
                 if [[ "$COMMAND" == "install-local" ]]; then
