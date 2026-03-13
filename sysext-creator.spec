@@ -1,7 +1,7 @@
 %bcond_without deps
 Name:           sysext-creator
 Version:        2.0.0
-Release:        3%{?dist}
+Release:        4%{?dist}
 Summary:        Správce systémových rozšíření pro Fedoru Kinoite/Silverblue
 
 License:        MIT
