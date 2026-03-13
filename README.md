@@ -18,9 +18,18 @@ Your base system remains 100% clean, untouched, and lightning fast.
 ---
 
 ## 🚀 Installation
+## Setup systemd-sysext
+1. create extensions dir
+```Bash
+sudo install -d -m 0755 -o 0 -g 0 "/var/lib/extensions"
+sudo restorecon -RFv "/var/lib/extensions"
+```
+2. activate systemd-sysext.service
 
 ## 🚀 Quick Installation (Standalone RAW)
-
+```Bash
+sudo systemctl enable systemd-sysext.service
+```
 Sysext-Creator is distributed as a system extension itself!
 
 1. Download the latest `sysext-creator.raw` from the Releases page.
@@ -28,7 +37,7 @@ Sysext-Creator is distributed as a system extension itself!
 *(note be sure you have enabled systemd-sysext and properly created /var/lib/extensions)
 ```bash
    sudo cp sysext-creator.raw /var/lib/extensions/
-   sudo systemd-sysext refresh
+   sudo systemctl restart systemd-sysext.service
  ```
 3.Run the bootstrap setup (available directly from the image):
 
