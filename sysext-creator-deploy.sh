@@ -177,6 +177,7 @@ fi
 if [[ -f "$STAGING_DIR/doctor.req" ]]; then
     log "Running Sysext Doctor diagnostics..."
     res_file="$STAGING_DIR/doctor.res"
+    tmp_res="$STAGING_DIR/doctor.tmp"
     host_ver=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
     has_errors=0
 
@@ -245,9 +246,11 @@ if [[ -f "$STAGING_DIR/doctor.req" ]]; then
         else
             echo "⚠️  Diagnostics completed, but issues were found. Please fix them, or the system extensions might not work properly."
         fi
-    } > "$res_file" 2>&1
+    } > "$tmp_res" 2>&1
 
-    chmod 0666 "$res_file" 2>/dev/null || true
+    # Atomické přesunutí až po kompletním zápisu
+    chmod 0666 "$tmp_res" 2>/dev/null || true
+    mv "$tmp_res" "$res_file"
     rm -f "$STAGING_DIR/doctor.req"
 fi
 
