@@ -73,10 +73,10 @@ else
     fail "Aplikace $PKG_COMPLEX selhala. Chybí závislosti?"; 
 fi
 
-if [[ -d "/etc/mc" ]]; then 
-    pass "Konfigurace byla úspěšně zapsána do /etc/mc."
+if [[ -d "/etc/fake-complex" ]]; then 
+    pass "Konfigurace byla úspěšně zapsána do /etc/fake-complex."
 else 
-    fail "Složka /etc/mc chybí! Démon nerozbalil .etc.tar.gz archiv."; 
+    fail "Složka /etc/fake-complex chybí! Démon nerozbalil .etc.tar.gz archiv."; 
 fi
 
 step "Odstranění komplexního balíčku vč. konfigurace (Force Remove)"
@@ -90,10 +90,10 @@ else
     fail "Odstranění $PKG_COMPLEX selhalo."; 
 fi
 
-if [[ ! -d "/etc/mc" ]] || [[ -z "$(ls -A /etc/mc 2>/dev/null)" ]]; then 
+if [[ ! -d "/etc/fake-complex" ]] || [[ -z "$(ls -A /etc/fake-complex 2>/dev/null)" ]]; then 
     pass "Stopy v /etc/ byly čistě uklizeny díky trackeru."
 else 
-    fail "Konfigurace /etc/mc zůstala v systému po smazání."; 
+    fail "Konfigurace /etc/fake-complex zůstala v systému po smazání."; 
 fi
 
 # --- 4. Crash Test: Gatekeeper a poškozený soubor ---
