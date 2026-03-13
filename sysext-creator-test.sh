@@ -5,8 +5,8 @@
 # ======================================================================
 set -euo pipefail
 
-PKG_SIMPLE="distrobox"
-PKG_COMPLEX="mc"
+PKG_SIMPLE="fake-package-simple"
+PKG_COMPLEX="fake-package-complex"
 LOG_FILE="/var/log/sysext-creator.log"
 EXT_DIR="/var/lib/extensions"
 STAGING_DIR="/var/tmp/sysext-staging"
