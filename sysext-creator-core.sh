@@ -113,16 +113,17 @@ cmd_install() {
     dnf download $deps --refresh --forcearch="$(uname -m)" --exclude="*.i686" --destdir="$WORKDIR/rpms" >/dev/null
     for rpm in "$WORKDIR/rpms"/*.rpm; do rpm2cpio "$rpm" | cpio -idm -D "$WORKDIR" --quiet 2>/dev/null; done
     
-    info "Resolving base system conflicts (Smart Pruning)..."
+    info "Resolving base system conflicts (Ultra-Fast Smart Pruning)..."
     local map_file="$STAGING_DIR/host_usr_files.txt"
 
     if [[ -f "$map_file" ]]; then
-        find "$WORKDIR/usr" \( -type f -o -type l \) 2>/dev/null | while read -r filepath; do
-            relative_path="${filepath#$WORKDIR}"
-            if grep -F -x -q "$relative_path" "$map_file"; then
-                rm -f "$filepath"
+        find "$WORKDIR/usr" \( -type f -o -type l \) 2>/dev/null | sed "s|^$WORKDIR||" > "$WORKDIR/extracted_files.txt" || true
+        if [[ -s "$WORKDIR/extracted_files.txt" ]]; then
+            grep -F -x -f "$map_file" "$WORKDIR/extracted_files.txt" > "$WORKDIR/to_delete.txt" || true
+            if [[ -s "$WORKDIR/to_delete.txt" ]]; then
+                sed "s|^|$WORKDIR|" "$WORKDIR/to_delete.txt" | tr '\n' '\0' | xargs -0 rm -f 2>/dev/null || true
             fi
-        done
+        fi
     fi
 
     process_extension "$package" "$host_version" "$available_v" "$mode"
