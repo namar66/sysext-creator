@@ -1,6 +1,7 @@
 [Desktop Entry]
 Name=Sysext-Creator
-Comment=Správa systémových rozšíření pro atomickou Fedoru
+Comment=Managing system extensions for Fedora Atomic
+Comment[cs]=Správa systémových rozšíření pro atomickou Fedoru
 Exec=sysext-gui-wrapper
 Icon=sysext-creator-icon
 Terminal=false
