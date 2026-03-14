@@ -2,7 +2,7 @@ Name:           fake-package-complex
 Version:        1.0
 Release:        3%{?dist}
 Summary:        Complex test package with config and dependencies
-License:        MIT
+License:        GPLv2
 BuildArch:      noarch
 
 Requires:       fake-package-simple
