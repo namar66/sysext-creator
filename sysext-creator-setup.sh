@@ -1,36 +1,38 @@
 #!/bin/bash
 set -euo pipefail
 
-# ==========================================
-# UNINSTALL LOGIKA
-# ==========================================
+# ======================================================================
+# UNINSTALL LOGIC
+# ======================================================================
 if [[ "${1:-}" == "uninstall" ]]; then
-    echo "🧹 Zahajuji kompletní odstranění lokální instalace Sysext-Creator..."
+    echo "🧹 Starting complete removal of local Sysext-Creator installation..."
 
-    echo "=> Vypínám a odstraňuji systemd služby..."
+    echo "=> Stopping and removing systemd services..."
     sudo systemctl stop sysext-creator-deploy.path sysext-creator-deploy.service 2>/dev/null || true
     sudo systemctl disable sysext-creator-deploy.path sysext-creator-deploy.service 2>/dev/null || true
     sudo rm -f /etc/systemd/system/sysext-creator-deploy.path
     sudo rm -f /etc/systemd/system/sysext-creator-deploy.service
     sudo systemctl daemon-reload
 
-    echo "=> Odstraňuji hostitelského démona..."
+    echo "=> Removing host daemon..."
     sudo rm -f /usr/local/bin/sysext-creator-deploy.sh
 
-    echo "=> Odstraňuji uživatelské binárky a GUI..."
+    echo "=> Removing user binaries and GUI..."
     rm -f "$HOME/.local/bin/sysext-creator"
     rm -f "$HOME/.local/bin/sysext-creator-core"
     rm -f "$HOME/.local/bin/sysext-gui"
+    rm -f "$HOME/.local/bin/sysext-gui-wrapper-gui"
+    rm -f "$HOME/.local/bin/sysext-creator-test"
 
-    echo "=> Odstraňuji integraci do plochy, menu a doplňování terminálu..."
+    echo "=> Removing desktop integration, menu, and bash completion..."
     rm -f "$HOME/.local/share/applications/sysext-creator.desktop"
     rm -f "$HOME/.local/share/icons/hicolor/512x512/apps/sysext-creator-icon.png"
     rm -f "$HOME/.local/share/kio/servicemenus/sysext-creator-install.desktop"
     rm -f "$HOME/.local/share/bash-completion/completions/sysext-creator"
-    rm -f "$HOME/.local/bin/sysext-creator-test"
+
     if command -v kbuildsycoca6 &> /dev/null; then
-    kbuildsycoca6 &>/dev/null || true
-    echo "✅ KDE menu aktualizováno."
+        kbuildsycoca6 &>/dev/null || true
+        echo "✅ KDE menu updated."
     fi
     if command -v update-desktop-database &> /dev/null; then
         update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
@@ -39,27 +41,26 @@ if [[ "${1:-}" == "uninstall" ]]; then
     echo ""
     read -p "Do you want to remove ALL installed raw images in /var/lib/extensions? (yes/no): " remove_all
     if [[ "$remove_all" == "yes" ]]; then
-        echo "=> Odstraňuji VŠECHNY RAW obrazy..."
+        echo "=> Removing ALL RAW images..."
         sudo rm -f /var/lib/extensions/*.raw
     else
-        echo "=> Ponechávám uživatelské obrazy, odstraňuji pouze případný samotný Sysext-Creator obraz..."
-        sudo rm -f /var/lib/extensions/sysext-creator-fc*.raw
-        sudo rm -f /var/lib/extensions/sysext-creator.raw 2>/dev/null || true
+        echo "=> Keeping user images, removing only Sysext-Creator itself..."
+        sudo rm -f /var/lib/extensions/sysext-creator*.raw
     fi
 
-    echo "=> Odpojuji systémová rozšíření..."
+    echo "=> Unmounting system extensions..."
     sudo systemd-sysext refresh
 
     echo "--------------------------------------------------------"
-    echo "✅ Lokální instalace Sysext-Creator byla kompletně odstraněna."
+    echo "✅ Local Sysext-Creator installation has been completely removed."
     echo "--------------------------------------------------------"
     exit 0
 fi
 
-# ==========================================
-# INSTALL LOGIKA
-# ==========================================
-echo "🚀 Starting Sysext-Creator environment setup (v2.0)..."
+# ======================================================================
+# INSTALL LOGIC
+# ======================================================================
+echo "🚀 Starting Sysext-Creator environment setup (v2.0.1)..."
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 HOST_VERSION=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
@@ -107,14 +108,12 @@ DirectoryMode=0777
 WantedBy=multi-user.target
 EOF
 
-# --- ZDE JE OCHRANA PROTI SELINUX CHYBĚ ---
-echo "=> Opravuji SELinux kontexty pro systemd služby..."
+echo "=> Fixing SELinux contexts for systemd services..."
 if command -v restorecon &> /dev/null; then
     sudo restorecon -v /etc/systemd/system/sysext-creator-deploy.service
     sudo restorecon -v /etc/systemd/system/sysext-creator-deploy.path
     sudo restorecon -v /usr/local/bin/sysext-creator-deploy.sh
 fi
-# ------------------------------------------
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now sysext-creator-deploy.path
@@ -127,17 +126,18 @@ chmod +x "$HOME/.local/bin/sysext-creator-core" "$HOME/.local/bin/sysext-creator
 
 echo "=> Checking installed podman..."
 if ! command -v podman &> /dev/null; then
-    echo "❌ Error: Podman is required. Run on a atomic version of Fedora."
+    echo "❌ Error: Podman is required. Run on an atomic version of Fedora."
     exit 1
 fi
 
 if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] || pgrep -x plasmashell > /dev/null; then
-    echo "=> Prostředí KDE detekováno. Přidávám kontextové menu do Dolphinu..."
+    echo "=> KDE environment detected. Adding context menu to Dolphin..."
     SERVICE_DIR="$HOME/.local/share/kio/servicemenus/"
     mkdir -p "$SERVICE_DIR"
     cp "$SCRIPT_DIR/sysext-creator-install.desktop" "$HOME/.local/share/kio/servicemenus/sysext-creator-install.desktop"
     chmod +x "$HOME/.local/share/kio/servicemenus/sysext-creator-install.desktop"
-    echo "✅ Akce pro .rpm soubory úspěšně přidána."
+    echo "✅ Action for .rpm files successfully added."
+    
     echo "=> Setting up GUI application..."
     cp "$SCRIPT_DIR/sysext-gui" "$HOME/.local/bin/"
     cp "$SCRIPT_DIR/sysext-gui-wrapper-gui.sh" "$HOME/.local/bin/sysext-gui-wrapper-gui"
@@ -148,18 +148,19 @@ if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] || pgrep -x plasmashell > /dev/nu
     mkdir -p "$HOME/.local/share/icons/hicolor/512x512/apps"
     cp "$SCRIPT_DIR/sysext-creator-icon.png" "$HOME/.local/share/icons/hicolor/512x512/apps/"
     cp "$SCRIPT_DIR/sysext-creator.desktop" "$HOME/.local/share/applications/"
+    
     if command -v kbuildsycoca6 &> /dev/null; then
-    kbuildsycoca6 &>/dev/null || true
-    echo "✅ KDE menu aktualizováno."
+        kbuildsycoca6 &>/dev/null || true
+        echo "✅ KDE menu updated."
     fi
     if command -v update-desktop-database &> /dev/null; then
-     update-desktop-database "$HOME/.local/share/applications" || true
-   fi
+        update-desktop-database "$HOME/.local/share/applications" || true
+    fi
 else
-    echo "=> Prostředí KDE nebylo detekováno (běžíte pravděpodobně na GNOME/Silverblue). Instaluji pouze CLI verzi."
+    echo "=> KDE environment not detected (likely GNOME/Silverblue). Installing CLI version only."
 fi
 
-echo "=> Konfiguruji automatické doplňování pro Bash..."
+echo "=> Configuring Bash auto-completion..."
 COMPLETION_DIR="$HOME/.local/share/bash-completion/completions"
 mkdir -p "$COMPLETION_DIR"
 
@@ -167,23 +168,21 @@ if [[ -f "$SCRIPT_DIR/bash-completion" ]]; then
     cp "$SCRIPT_DIR/bash-completion" "$COMPLETION_DIR/sysext-creator"
     source "$COMPLETION_DIR/sysext-creator" 2>/dev/null || true
 else
-    echo "⚠️ Upozornění: Soubor bash-completion v repozitáři chybí."
+    echo "⚠️ Warning: bash-completion file is missing in the repository."
 fi
-# ---------- NOVÁ ČÁST PRO TESTY ----------
-echo "=> Kopíruji nástroj pro integrační testy..."
+
+echo "=> Copying integration test tool..."
 cp "$SCRIPT_DIR/sysext-creator-test.sh" "$HOME/.local/bin/sysext-creator-test"
 chmod +x "$HOME/.local/bin/sysext-creator-test"
 
 echo -e "\n================================================================================"
-echo "✅ Instalace Sysext-Creator (v2.0) byla úspěšně dokončena!"
+echo "✅ Sysext-Creator (v2.0) local installation successfully completed!"
 echo "================================================================================"
-echo "⏳ Spouštím automatickou diagnostiku a zkoušku ohněm (E2E Test)..."
-echo "Během testu se na pozadí vytvoří a zase smažou zkušební balíčky."
+echo "⏳ Running automatic diagnostics and E2E Test..."
+echo "Test packages will be created and deleted in the background during the test."
 
-# Spuštění samotného testu
 sysext-creator-test
 
-echo -e "\nPokud testy prošly zeleně, systém je připraven k použití."
-#echo "Pro nápovědu napiš: sysext-creator --help"
+echo -e "\nIf the tests passed (green), the system is ready to use."
 echo "--------------------------------------------------------"
-echo "✅ Lokální instalace dokončena!"
+echo "✅ Local installation complete!"
