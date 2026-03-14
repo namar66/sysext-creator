@@ -70,8 +70,6 @@ get_available_version() { dnf repoquery --latest-limit=1 --queryformat "%{versio
 cmd_install() {
     local package="$1" host_version="$2" mode="${3:-install}"
 
-    [[ "$package" =~ ^($(IFS='|'; echo "${BLACKLIST[*]}"))$ ]] && die "Installation of '$package' is blocked (blacklist)."
-
     local installed_v=$(get_installed_version "$package")
     local available_v=$(get_available_version "$package")
 
@@ -88,9 +86,6 @@ cmd_install() {
     fi
 
     [[ "$installed_v" == "$available_v" && "$installed_v" != "unknown" ]] && { status "Package is already up to date."; return 0; }
-
-    WORKDIR=$(mktemp -d)
-    mkdir -p "$WORKDIR/rpms"
 
     info "Reading resolved dependencies from host tunnel..."
     local deps="${RESOLVED_DEPS:-}"
@@ -109,21 +104,54 @@ cmd_install() {
 
     [[ -z "$deps" || "$deps" == " " ]] && deps="$package"
 
+    # FIX 1: Convert string to array to prevent shell injection via word splitting
+    read -ra DEPS_ARRAY <<< "$deps"
+
+    # FIX 2: Deep Blacklist Check (Check all resolved dependencies, not just the parent)
+    for dep in "${DEPS_ARRAY[@]}"; do
+        for b in "${BLACKLIST[@]}"; do
+            # Strict match or match with version dash (e.g. systemd or systemd-255)
+            if [[ "$dep" == "$b" || "$dep" =~ ^${b}- ]]; then
+                die "Security block: Dependency '$dep' contains blacklisted core system component '$b'. Aborting to prevent Kernel Panic."
+            fi
+        done
+    done
+
+    WORKDIR=$(mktemp -d)
+    mkdir -p "$WORKDIR/rpms"
+
     info "Downloading and extracting RPM packages..."
-    dnf download $deps --refresh --forcearch="$(uname -m)" --exclude="*.i686" --destdir="$WORKDIR/rpms" >/dev/null
-    for rpm in "$WORKDIR/rpms"/*.rpm; do rpm2cpio "$rpm" | cpio -idm -D "$WORKDIR" --quiet 2>/dev/null; done
+    dnf clean expire-cache >/dev/null 2>&1 || true
+
+    local retries=3
+    local dl_success=0
+    for ((i=1; i<=retries; i++)); do
+        # FIX 1.5: Pass the array securely to DNF to prevent command execution
+        if dnf download "${DEPS_ARRAY[@]}" --refresh --forcearch="$(uname -m)" --exclude="*.i686" --destdir="$WORKDIR/rpms"; then
+            dl_success=1
+            break
+        else
+            warn "Download failed (attempt $i/$retries). Retrying in 2 seconds..."
+            sleep 2
+        fi
+    done
+
+    if [[ $dl_success -eq 0 ]]; then
+        die "Failed to download packages after $retries attempts. Check your network or repository."
+    fi
+
+    for rpm in "$WORKDIR/rpms"/*.rpm; do rpm2cpio "$rpm" | cpio -idm -D "$WORKDIR" --quiet 2>/dev/null || true; done
     
-    info "Resolving base system conflicts (Ultra-Fast Smart Pruning)..."
+    info "Resolving base system conflicts (Smart Pruning)..."
     local map_file="$STAGING_DIR/host_usr_files.txt"
 
     if [[ -f "$map_file" ]]; then
-        find "$WORKDIR/usr" \( -type f -o -type l \) 2>/dev/null | sed "s|^$WORKDIR||" > "$WORKDIR/extracted_files.txt" || true
-        if [[ -s "$WORKDIR/extracted_files.txt" ]]; then
-            grep -F -x -f "$map_file" "$WORKDIR/extracted_files.txt" > "$WORKDIR/to_delete.txt" || true
-            if [[ -s "$WORKDIR/to_delete.txt" ]]; then
-                sed "s|^|$WORKDIR|" "$WORKDIR/to_delete.txt" | tr '\n' '\0' | xargs -0 rm -f 2>/dev/null || true
+        find "$WORKDIR/usr" \( -type f -o -type l \) 2>/dev/null | while read -r filepath; do
+            relative_path="${filepath#$WORKDIR}"
+            if grep -F -x -q "$relative_path" "$map_file"; then
+                rm -f "$filepath"
             fi
-        fi
+        done
     fi
 
     process_extension "$package" "$host_version" "$available_v" "$mode"
@@ -147,139 +175,4 @@ cmd_install_local() {
 
     local installed_v=$(get_installed_version "$package")
     status "Local package: $package | Version: $available_v | Installed: ${installed_v:-no}"
-    [[ "$installed_v" == "$available_v" && "$installed_v" != "unknown" ]] && { status "This version is already installed."; return 0; }
-
-    WORKDIR=$(mktemp -d)
-    mkdir -p "$WORKDIR/rpms"
-
-    info "Reading resolved dependencies from host tunnel..."
-    local deps="${RESOLVED_DEPS:-}"
-    deps=$(echo "$deps" | tr ' ' '\n' | grep -v "^${package}$" | tr '\n' ' ' | xargs || true)
-
-    if [[ -n "$deps" ]]; then
-        info "Fetching missing dependencies from Fedora repositories: $deps"
-        dnf download $deps --refresh --forcearch="$(uname -m)" --exclude="*.i686" --destdir="$WORKDIR/rpms" --skip-unavailable >/dev/null
-    else
-        info "No additional dependencies from repositories are needed."
-    fi
-
-    info "Copying and extracting RPM packages..."
-    cp "$rpm_path" "$WORKDIR/rpms/"
-    for rpm in "$WORKDIR/rpms"/*.rpm; do rpm2cpio "$rpm" | cpio -idm -D "$WORKDIR" --quiet 2>/dev/null; done
-
-    process_extension "$package" "$host_version" "$available_v" "install"
-}
-
-process_extension() {
-    local package="$1" host_version="$2" available_v="$3" mode="$4"
-    local ext_name="${package}-fc${host_version}"
-
-    mkdir -p "$WORKDIR/usr/lib/extension-release.d"
-    
-    if [[ "$package" == "sysext-creator" ]]; then
-        local release_file="$WORKDIR/usr/lib/extension-release.d/extension-release.sysext-creator"
-        echo -e "ID=_any\nSYSEXT_SCOPE=system\nSYSEXT_VERSION_ID=$available_v" > "$release_file"
-        ext_name="sysext-creator"
-    else
-        local release_file="$WORKDIR/usr/lib/extension-release.d/extension-release.${ext_name}"
-        echo -e "ID=fedora\nVERSION_ID=$host_version\nSYSEXT_VERSION_ID=$available_v" > "$release_file"
-    fi
-
-    if [[ "$mode" != "update" ]] && ! [[ " ${SPECIAL_PACKAGES[*]} " =~ " ${package} " ]] && [[ -d "$WORKDIR/etc" ]]; then
-        info "Processing configuration files from /etc..."
-        tar -czf "$WORKDIR/${package}.etc.tar.gz" -C "$WORKDIR/etc" .
-        mv "$WORKDIR/${package}.etc.tar.gz" "$STAGING_DIR/"
-
-        find "$WORKDIR/etc" ! -type d | sed "s|$WORKDIR||" > "$STAGING_DIR/${package}.etc.tracker"
-        rm -rf "$WORKDIR/etc"
-    fi
-
-    local raw_file="$WORKDIR/${ext_name}.raw"
-    mkfs.erofs -zlz4hc --force-uid=0 --force-gid=0 --file-contexts=/tmp/file_contexts "$raw_file" "$WORKDIR" >/dev/null
-    mv "$raw_file" "$STAGING_DIR/"
-
-    success "Extension $ext_name was successfully dispatched to daemon for deployment."
-    cleanup_workdir
-}
-
-cmd_check_update() {
-    info "Checking for available updates..."
-    local packages="${HOST_PKGS:-}"
-
-    [[ -z "$packages" ]] && { status "No packages are installed."; return 0; }
-
-    local updates_available=0
-
-    echo ""
-    printf "%-30s %-25s %-25s\n" "PACKAGE" "INSTALLED" "AVAILABLE"
-    echo "--------------------------------------------------------------------------------"
-
-    for pkg in $packages; do
-        [[ -z "$pkg" ]] && continue
-        sleep 0.5
-
-        local installed_v=$(get_installed_version "$pkg")
-        local available_v=$(get_available_version "$pkg")
-
-        [[ -z "$available_v" ]] && available_v="unknown"
-        [[ -z "$installed_v" ]] && installed_v="unknown"
-
-        if [[ "$installed_v" != "$available_v" && "$available_v" != "unknown" ]]; then
-            printf "%-30s %-25s %-25s\n" "$pkg" "$installed_v" "$available_v"
-            updates_available=1
-        fi
-    done
-
-    echo ""
-    if [[ $updates_available -eq 0 ]]; then
-        success "All system extensions are up to date."
-    else
-        info "To install these updates, run: sysext-creator update"
-    fi
-}
-
-cmd_search() {
-    local keyword="${1:-}"
-    [[ -z "$keyword" ]] && die "Enter a search term (e.g., sysext-creator search htop)."
-
-    info "Searching for packages matching '$keyword'..."
-    local raw_output=$(dnf --quiet search "$keyword" 2>/dev/null || true)
-
-    if [[ -z "$raw_output" ]]; then
-        status "No packages found."
-        return 0
-    fi
-
-    echo ""
-    printf "%-35s %s\n" "PACKAGE" "SUMMARY"
-    echo "--------------------------------------------------------------------------------"
-
-    echo "$raw_output" | awk '
-        /^Odpov/ || /^Matched/ || /^Aktualizace/ || /^Updating/ || /^Repozit/ || /^Repositories/ || /^Posled/ || /^Last/ || /^===/ {next}
-        NF < 2 {next}
-        {
-            name_arch = $1
-            sub(/\.(x86_64|noarch|i686|aarch64|src)$/, "", name_arch)
-            $1 = ""
-            summary = $0
-            sub(/^ +/, "", summary)
-            printf "%-35s %s\n", name_arch, summary
-        }
-    ' | sort -u
-    echo ""
-}
-
-main() {
-    [[ $# -lt 1 ]] && { echo "Usage: $0 install|install-local|update-single|check-update|search [package/path]"; exit 1; }
-    local h_v=$(validate_environment)
-    case "$1" in
-        install)       cmd_install "$2" "$h_v" "install" ;;
-        install-local) cmd_install_local "$2" "$h_v" ;;
-        update-single) cmd_install "$2" "$h_v" "update" ;;
-        check-update)  cmd_check_update ;;
-        search)        cmd_search "${2:-}" ;;
-        *)             die "Unknown command: $1" ;;
-    esac
-}
-
-main "$@"
+    [[ "$installed_v" == "$available_v" && "$
