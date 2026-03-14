@@ -4,7 +4,7 @@ Version:        2.0.0
 Release:        11%{?dist}
 Summary:        System Extension Manager for Fedora Kinoite/Silverblue
 
-License:        MIT
+License:        GPLv2
 URL:            https://github.com/tvoje-jmeno/sysext-creator
 Source0:        %{name}-%{version}.tar.gz
 
