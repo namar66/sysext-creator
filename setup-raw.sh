@@ -77,9 +77,11 @@ echo "=> Setup COPR repo on host for resolving dependencies..."
 REPO_URL="https://copr.fedorainfracloud.org/coprs/nadmartin/sysext-creator/repo/fedora-$(rpm -E %fedora)/nadmartin-sysext-creator-fedora-$(rpm -E %fedora).repo"
 REPO_FILE="nadmartin-sysext-creator-fedora-$(rpm -E %fedora).repo"
 curl -sL -O "$REPO_URL"
+curl -sL -O https://download.copr.fedorainfracloud.org/results/nadmartin/sysext-creator/pubkey.gpg
 sudo install -o 0 -g 0 -m644 "$REPO_FILE" "/etc/yum.repos.d/$REPO_FILE"
+sudo install -o 0 -g 0 -m644 pubkey.gpg /etc/pki/rpm-gpg/nadmartin-sysext-creator-fedora-$(rpm -E %fedora).gpg
 rm -f "$REPO_FILE"
-
+rm -f pubkey.gpg
 if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] || pgrep -x plasmashell > /dev/null; then
     if command -v kbuildsycoca6 &> /dev/null; then
         kbuildsycoca6 &>/dev/null || true
