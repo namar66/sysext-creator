@@ -23,7 +23,20 @@ CORE_EXEC="/run/host${HOST_CORE_PATH}"
 # ======================================================================
 resolve_deps() {
     local target="$1"
-    rpm-ostree install --dry-run "$target" 2>/dev/null | sed -n -e '/packages:/,$p' -e '/^Added:/,$p' | grep -E '^  [a-zA-Z0-9]' | awk '{print $1}' | sed -E 's/-[0-9].*//' | sort -u | tr '\n' ' ' || true
+    local output
+    
+    # Capture both stdout and stderr. Catch failure if rpm-ostree cannot resolve the package.
+    if ! output=$(rpm-ostree install --dry-run "$target" 2>&1); then
+        echo -e "\n❌ ERROR: Host system (rpm-ostree) failed to resolve dependencies for '$target'." >&2
+        echo "📝 Details from rpm-ostree:" >&2
+        echo "$output" | sed 's/^/   /' >&2
+        echo -e "\n💡 TIP: If '$target' requires dependencies from 3rd-party repositories (e.g., RPM Fusion, Copr)," >&2
+        echo "   you must ensure those repositories are enabled on your HOST system in /etc/yum.repos.d/." >&2
+        return 1
+    fi
+
+    # Parse the added packages if successful
+    echo "$output" | sed -n -e '/packages:/,$p' -e '/^Added:/,$p' | grep -E '^  [a-zA-Z0-9]' | awk '{print $1}' | sed -E 's/-[0-9].*//' | sort -u | tr '\n' ' ' || true
 }
 
 cmd_doctor() {
@@ -216,13 +229,16 @@ main() {
             echo "=> Creating host system map for smart pruning..."
             rpm -qal 2>/dev/null | grep '^/usr/' > "$STAGING_DIR/host_usr_files.txt" || true
 
-            for target in $pkgs; do
+             for target in $pkgs; do
                 if [[ "$cmd" == "install-local" ]]; then
                     local abs_path=$(realpath "$target")
                     podman exec -i "$CONTAINER_NAME" "$CORE_EXEC" install-local "$abs_path"
                 else
                     echo "=> Resolving dependencies for $target via host system..."
-                    local deps=$(resolve_deps "$target")
+                    if ! deps=$(resolve_deps "$target"); then
+                        echo "❌ Installation aborted."
+                        exit 1
+                    fi
                     podman exec -e RESOLVED_DEPS="$deps" -i "$CONTAINER_NAME" "$CORE_EXEC" install "$target"
                 fi
             done
@@ -249,8 +265,13 @@ main() {
 
             for target in $final_pkgs; do
                 [[ -z "$target" || "$target" == " " ]] && continue
+                
                 echo "=> Resolving dependencies for $target via host system..."
-                local deps=$(resolve_deps "$target")
+                if ! deps=$(resolve_deps "$target"); then
+                    echo "⚠️ Skipping update for $target due to dependency resolution failure."
+                    continue
+                fi
+                
                 podman exec -e RESOLVED_DEPS="$deps" -i "$CONTAINER_NAME" "$CORE_EXEC" update-single "$target"
             done
             ;;
