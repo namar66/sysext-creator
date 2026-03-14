@@ -1,9 +1,8 @@
 [Unit]
-Description=Sysext Creator IPC Socket
+Description=Sysext Creator Varlink Socket
 
-
+[Socket]
 ListenStream=/run/sysext-creator.sock
-# Accept=yes říká systemd, aby pro každé připojení vytvořil novou instanci služby
 Accept=yes
 SocketMode=0660
 SocketUser=root
