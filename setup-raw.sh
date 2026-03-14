@@ -73,19 +73,12 @@ echo "=> Checking Podman container environment..."
 /usr/bin/sysext-creator list > /dev/null 2>&1 || true
 
 # Setup COPR repo on host for resolving dependencies
-sudo tee /etc/yum.repos.d/_copr_nadmartin-sysext-creator.repo > /dev/null << 'EOF'
-[copr:copr.fedorainfracloud.org:nadmartin:sysext-creator]
-name=Copr repo for sysext-creator owned by nadmartin
-baseurl=https://download.copr.fedorainfracloud.org/results/nadmartin/sysext-creator/fedora-$releasever-$basearch/
-type=rpm-md
-skip_if_unavailable=True
-gpgcheck=1
-gpgkey=https://download.copr.fedorainfracloud.org/results/nadmartin/sysext-creator/pubkey.gpg
-repo_gpgcheck=0
-enabled=1
-enabled_metadata=1
-exclude=*.src*
-EOF
+echo "=> Setup COPR repo on host for resolving dependencies..."
+REPO_URL="https://copr.fedorainfracloud.org/coprs/nadmartin/sysext-creator/repo/fedora-$(rpm -E %fedora)/nadmartin-sysext-creator-fedora-$(rpm -E %fedora).repo"
+REPO_FILE="nadmartin-sysext-creator-fedora-$(rpm -E %fedora).repo"
+curl -sL -O "$REPO_URL"
+sudo install -o 0 -g 0 -m644 "$REPO_FILE" "/etc/yum.repos.d/$REPO_FILE"
+rm -f "$REPO_FILE"
 
 if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] || pgrep -x plasmashell > /dev/null; then
     if command -v kbuildsycoca6 &> /dev/null; then
