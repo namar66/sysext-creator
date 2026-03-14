@@ -154,8 +154,8 @@ if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] || pgrep -x plasmashell > /dev/nu
     
     echo "=> Setting up GUI application..."
     cp "$SCRIPT_DIR/sysext-gui" "$HOME/.local/bin/"
-    cp "$SCRIPT_DIR/sysext-gui-wrapper-gui.sh" "$HOME/.local/bin/sysext-gui-wrapper-gui"
-    chmod +x "$HOME/.local/bin/sysext-gui" "$HOME/.local/bin/sysext-gui-wrapper-gui"
+    cp "$SCRIPT_DIR/sysext-gui-wrapper-gui.sh" "$HOME/.local/bin/sysext-gui-wrapper"
+    chmod +x "$HOME/.local/bin/sysext-gui" "$HOME/.local/bin/sysext-gui-wrapper"
 
     echo "=> Installing desktop entry and icon..."
     mkdir -p "$HOME/.local/share/applications"
