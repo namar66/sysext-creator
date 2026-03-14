@@ -9,8 +9,8 @@ import re
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QTabWidget, QTableWidget, QTableWidgetItem,
                              QPushButton, QLineEdit, QLabel, QHeaderView, QMessageBox,
-                             QDialog, QPlainTextEdit)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+                             QDialog, QPlainTextEdit, QCheckBox)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QIcon, QFont
 
 # ======================================================================
@@ -25,6 +25,7 @@ I18N = {
         "header_title": "📦 System Extensions Manager (Kinoite Edition)",
         "tab_installed": "✅ Installed",
         "tab_explore": "🌐 Explore (Repository)",
+        "tab_logs": "📜 Daemon Logs",
         "col_pkg": "Package",
         "col_ver": "Version",
         "col_status": "Status",
@@ -36,6 +37,8 @@ I18N = {
         "btn_search": "🔍 Search",
         "btn_remove": "🗑️ Remove",
         "btn_install": "➕ Install",
+        "btn_refresh_logs": "🔄 Refresh",
+        "cb_autoscroll": "⏬ Auto-scroll",
         "search_placeholder": "Search for a package (e.g., kate, htop, mc)...",
         "status_installed": "Installed",
         "no_summary": "No summary available",
@@ -49,6 +52,7 @@ I18N = {
         "dialog_error_msg": "Error during {}:\n{}",
         "msg_pkg_success": "Package {} was successfully processed.",
         "msg_all_success": "All packages were updated.",
+        "msg_no_logs": "Log file (/var/log/sysext-creator.log) is empty or does not exist.",
         "op_install": "Installation",
         "op_rm": "Removal",
         "op_update": "Update",
@@ -69,6 +73,7 @@ I18N = {
         "header_title": "📦 Správce systémových rozšíření (Kinoite Edition)",
         "tab_installed": "✅ Nainstalováno",
         "tab_explore": "🌐 Prozkoumat (Repozitář)",
+        "tab_logs": "📜 Záznamy démona",
         "col_pkg": "Balíček",
         "col_ver": "Verze",
         "col_status": "Stav",
@@ -80,6 +85,8 @@ I18N = {
         "btn_search": "🔍 Hledat",
         "btn_remove": "🗑️ Odstranit",
         "btn_install": "➕ Instalovat",
+        "btn_refresh_logs": "🔄 Načíst znovu",
+        "cb_autoscroll": "⏬ Automaticky rolovat",
         "search_placeholder": "Hledat balíček (např. kate, htop, mc)...",
         "status_installed": "Nainstalováno",
         "no_summary": "Bez popisu",
@@ -93,6 +100,7 @@ I18N = {
         "dialog_error_msg": "Chyba při operaci {}:\n{}",
         "msg_pkg_success": "Balíček {} byl úspěšně zpracován.",
         "msg_all_success": "Všechny balíčky byly aktualizovány.",
+        "msg_no_logs": "Soubor se záznamy (/var/log/sysext-creator.log) je prázdný nebo neexistuje.",
         "op_install": "Instalace",
         "op_rm": "Odstranění",
         "op_update": "Aktualizace",
@@ -220,7 +228,7 @@ class DoctorWorker(QThread):
 
     def run(self):
         try:
-            # OPRAVA 2.0: Odstraněno 'pkexec'. Diagnostika běží nativně jako uživatel
+            # Diagnostika běží nativně jako uživatel
             # a komunikuje s root démonem přes staging složku.
             process = subprocess.run(
                 ["sysext-creator", "doctor"],
@@ -309,6 +317,7 @@ class SysextManager(QMainWindow):
 
         self.setup_installed_tab()
         self.setup_explore_tab()
+        self.setup_logs_tab() # NOVÁ ZÁLOŽKA
         self.load_installed_packages()
 
     def setup_installed_tab(self):
@@ -360,6 +369,74 @@ class SysextManager(QMainWindow):
         self.search_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.search_table)
         self.tabs.addTab(tab, tr("tab_explore"))
+
+    # ==========================================
+    # NOVÁ METODA PRO ZÁLOŽKU LOGŮ
+    # ==========================================
+    def setup_logs_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        ctrl_layout = QHBoxLayout()
+        self.refresh_logs_btn = QPushButton(tr("btn_refresh_logs"))
+        self.refresh_logs_btn.clicked.connect(self.load_logs)
+        
+        self.autoscroll_cb = QCheckBox(tr("cb_autoscroll"))
+        self.autoscroll_cb.setChecked(True)
+
+        ctrl_layout.addWidget(self.refresh_logs_btn)
+        ctrl_layout.addWidget(self.autoscroll_cb)
+        ctrl_layout.addStretch()
+        layout.addLayout(ctrl_layout)
+
+        self.logs_text = QPlainTextEdit()
+        self.logs_text.setReadOnly(True)
+        font = QFont("Monospace")
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        font.setPointSize(10)
+        self.logs_text.setFont(font)
+        layout.addWidget(self.logs_text)
+
+        self.tabs.addTab(tab, tr("tab_logs"))
+
+        # Časovač pro živé aktualizace (tail -f)
+        self.log_path = "/var/log/sysext-creator.log"
+        self.last_log_size = 0
+        self.log_timer = QTimer(self)
+        self.log_timer.timeout.connect(self.check_log_updates)
+        self.log_timer.start(1500) # Kontrola každé 1.5 sekundy
+        
+        self.load_logs()
+
+    def load_logs(self):
+        if not os.path.exists(self.log_path) or os.path.getsize(self.log_path) == 0:
+            self.logs_text.setPlainText(tr("msg_no_logs"))
+            self.last_log_size = 0
+            return
+
+        try:
+            with open(self.log_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                self.logs_text.setPlainText(content)
+                self.last_log_size = os.path.getsize(self.log_path)
+
+                # Automatické rolování dolů, pokud je zaškrtnuto
+                if self.autoscroll_cb.isChecked():
+                    scrollbar = self.logs_text.verticalScrollBar()
+                    scrollbar.setValue(scrollbar.maximum())
+        except Exception as e:
+            self.logs_text.setPlainText(f"Error reading logs: {e}")
+
+    def check_log_updates(self):
+        # Aktualizujeme logy POUZE tehdy, pokud je uživatel na této záložce
+        # (index 2), aby to zbytečně nežralo výkon na pozadí.
+        if self.tabs.currentIndex() == 2:
+            if os.path.exists(self.log_path):
+                current_size = os.path.getsize(self.log_path)
+                if current_size != self.last_log_size:
+                    self.load_logs()
+
+    # ==========================================
 
     def send_notification(self, title, message):
         try:
