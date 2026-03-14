@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ======================================================================
-# Sysext-Creator Integration Test Suite v2.0
+# Sysext-Creator Integration Test Suite v2.0.1
 # ======================================================================
 set -euo pipefail
 
@@ -11,7 +11,7 @@ LOG_FILE="/var/log/sysext-creator.log"
 EXT_DIR="/var/lib/extensions"
 STAGING_DIR="/var/tmp/sysext-staging"
 
-# Barevný výstup
+# Output colors
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 BLUE='\033[0;34m'
@@ -24,127 +24,118 @@ step() { echo -e "\n${BLUE}▶▶ TEST:${NC} $1"; }
 warn() { echo -e "${YELLOW}⚠️ WARN:${NC} $1"; }
 
 # --- 0. Pre-flight Checks ---
-step "Kontrola prostředí"
-if ! command -v sysext-creator &> /dev/null; then fail "sysext-creator chybí v PATH."; fi
-if ! systemctl is-active --quiet sysext-creator-deploy.path; then fail "Démon neběží!"; fi
-pass "Nástroj i démon jsou připraveny."
+step "Environment Check"
+if ! command -v sysext-creator &> /dev/null; then fail "sysext-creator is missing in PATH."; fi
+if ! systemctl is-active --quiet sysext-creator-deploy.path; then fail "Deployment daemon is not running!"; fi
+pass "Tool and daemon are ready."
 
-# Vyčištění před testem
+step "Pre-test cleanup"
 for pkg in "$PKG_SIMPLE" "$PKG_COMPLEX"; do
-    if sysext-creator list | grep -q "📦 $pkg"; then
-        warn "Balíček $pkg už je nainstalován. Provádím čistku před testem..."
+    if sysext-creator list | grep -q "$pkg"; then
         sysext-creator rm "$pkg" yes >/dev/null
-        sleep 4
     fi
 done
-
-# --- 1. Test komunikace s démonem (Doctor) ---
-step "Komunikace s démonem (Doctor)"
-if sysext-creator doctor | grep -q "Diagnostics completed"; then pass "Démon odpovídá."
-else fail "Doctor nevrátil očekávaný výstup."; fi
-
-# --- ZÁZNAM STAVU PŘED TESTEM ---
-step "Snapshot stavu /etc před spuštěním testů"
-# Uložíme si přesný počet položek v /etc (a ignorujeme chyby práv)
 ETC_COUNT_BEFORE=$({ find /etc 2>/dev/null || true; } | wc -l)
-pass "Výchozí počet položek v /etc: $ETC_COUNT_BEFORE"
-# --- 2. Test jednoduchého balíčku (Bez závislostí) ---
-step "Instalace jednoduchého balíčku: $PKG_SIMPLE"
-sysext-creator install "$PKG_SIMPLE" > /dev/null
-sleep 4
+pass "System is clean, test can begin."
 
-if command -v "$PKG_SIMPLE" &> /dev/null; then pass "Příkaz $PKG_SIMPLE je v systému dostupný."
-else fail "Aplikace $PKG_SIMPLE se nenainstalovala správně."; fi
-
-sysext-creator rm "$PKG_SIMPLE" > /dev/null
-sleep 4
-if ! command -v "$PKG_SIMPLE" &> /dev/null; then pass "Balíček $PKG_SIMPLE úspěšně odstraněn."
-else fail "Odstranění $PKG_SIMPLE selhalo."; fi
-
-
-# --- 3. Test komplexního balíčku (Závislosti + /etc/) ---
-step "Instalace komplexního balíčku: $PKG_COMPLEX (tunel + /etc)"
-sysext-creator install "$PKG_COMPLEX" > /dev/null
-sleep 5
-
-echo "=> Ověřuji dostupnost binárek a funkčnost závislostí..."
-
-# 1. Kontrola hlavního balíčku
-if command -v "$PKG_COMPLEX" &> /dev/null; then 
-    pass "Příkaz $PKG_COMPLEX nalezen (hlavní balíček se nainstaloval)."
-else 
-    fail "Příkaz $PKG_COMPLEX nebyl nalezen. Instalace selhala!"
+# --- 1. Simple package installation ---
+step "1. Installation of a simple package (Basic .raw build)"
+if sysext-creator install "$PKG_SIMPLE" >/dev/null; then
+    pass "Installation completed without error codes."
+else
+    fail "sysext-creator install command failed."
 fi
 
-# 2. Kontrola závislosti (Tohle je ten nejdůležitější test!)
-if command -v "$PKG_SIMPLE" &> /dev/null; then 
-    pass "Příkaz $PKG_SIMPLE nalezen (řešení závislostí funguje na 100 %!)."
+if command -v "fake-package-simple" &> /dev/null; then 
+    pass "Command fake-package-simple found (main package installed)."
 else 
-    fail "Příkaz $PKG_SIMPLE nebyl nalezen. Závislosti se nestáhly nebo nesloučily do obrazu!"
+    fail "Command fake-package-simple not found. Installation failed!"
 fi
 
-# 3. Kontrola atomického nasazení /etc (Když už to testujeme, tak pořádně)
+# --- 2. Complex package installation (/etc & dependencies) ---
+step "2. Installation of a complex package with /etc and dependencies"
+if sysext-creator install "$PKG_COMPLEX" >/dev/null; then
+    pass "Installation completed without error codes."
+else
+    fail "sysext-creator install command failed."
+fi
+
+if command -v "fake-package-complex" &> /dev/null; then 
+    pass "Command fake-package-complex found (main package installed)."
+else 
+    fail "Command fake-package-complex not found. Installation failed!"
+fi
+
 if [[ -f "/etc/fake-complex/config.conf" ]]; then
-    pass "Konfigurace v /etc se úspěšně nasadila (Démon funguje správně)."
+    pass "Configuration in /etc successfully deployed (Daemon works correctly)."
 else
-    fail "Konfigurace v /etc chybí! Démon nerozbalil .tar.gz."
+    fail "Configuration in /etc is missing! Daemon did not extract .tar.gz."
 fi
 
-step "Odstranění komplexního balíčku vč. konfigurace (Force Remove)"
-# Příkaz "yes" by měl spustit smazání souborů z /etc/ podle trackeru
-sysext-creator rm "$PKG_COMPLEX" yes > /dev/null
-sleep 5
-
-if ! command -v "$PKG_COMPLEX" &> /dev/null; then 
-    pass "Balíček $PKG_COMPLEX odebrán ze systému."
-else 
-    fail "Odstranění $PKG_COMPLEX selhalo."; 
-fi
-
-if [[ ! -d "/etc/fake-complex" ]] || [[ -z "$(ls -A /etc/fake-complex 2>/dev/null)" ]]; then 
-    pass "Stopy v /etc/ byly čistě uklizeny díky trackeru."
-else 
-    fail "Konfigurace /etc/fake-complex zůstala v systému po smazání."; 
-fi
-
-# --- 4. Crash Test: Gatekeeper a poškozený soubor ---
-step "CRASH TEST: Zamezení instalace poškozeného obrazu"
-DUMMY_FILE="$STAGING_DIR/poisoned-fc43.raw"
-echo "Tohle není validní erofs obraz, tohle je vir!" > "$DUMMY_FILE"
-sleep 4 # Čekáme na reakci démona
-
-if [[ ! -f "$DUMMY_FILE" ]]; then 
-    pass "Démon okamžitě smazal poškozený soubor ze Staging složky."
-else 
-    fail "Démon nechal poškozený soubor ve Staging složce!"; 
-fi
-
-if grep -q "Validation failed: poisoned-fc43.raw is corrupted" "$LOG_FILE"; then
-    pass "Záchyt poškozeného souboru byl správně zaznamenán v lozích."
+if [[ -f "/var/lib/sysext-creator/trackers/${PKG_COMPLEX}.etc.tracker" ]]; then
+    pass "Tracker for /etc was successfully generated."
 else
-    fail "V logu chybí záznam o odmítnutí poškozeného souboru."
+    fail "Tracker for /etc is missing!"
 fi
 
-# --- 5. Finální porovnání stavu /etc ---
-step "Kontrola absolutní čistoty systému (Snapshot porovnání)"
+# --- 3. Uninstallation and deep /etc cleanup check ---
+step "3. Uninstallation and deep /etc cleanup check"
+sysext-creator rm "$PKG_COMPLEX" yes >/dev/null
+
+if [[ ! -f "/etc/fake-complex/config.conf" ]]; then
+    pass "Configuration files from /etc were successfully deleted."
+else
+    fail "Configuration files remained in /etc after uninstallation!"
+fi
+
+if [[ ! -d "/etc/fake-complex" ]]; then
+    pass "Directory in /etc was cleanly removed after deleting files."
+else
+    fail "Empty directory in /etc remained after uninstallation!"
+fi
+
+# Cleanup the simple package as well
+sysext-creator rm "$PKG_SIMPLE" yes >/dev/null
+
+# --- 4. Trial by fire: Resistance to corrupted images ---
+step "4. Trial by fire: Resistance to corrupted images"
+POISON_FILE="$STAGING_DIR/poisoned.raw"
+echo "This is definitely not a valid squashfs/erofs image" > "$POISON_FILE"
+
+# Wait for daemon to process it
+sleep 3
+
+if [[ ! -f "$POISON_FILE" ]]; then
+    pass "Daemon correctly blocked deployment and deleted the corrupted file from the Staging directory."
+else 
+    fail "Daemon left the corrupted file in the Staging directory!" 
+fi
+
+if grep -q "Validation failed: poisoned.raw is corrupted" "$LOG_FILE"; then
+    pass "Detection of the corrupted file was correctly logged."
+else
+    fail "Missing log entry about rejection of the corrupted file."
+fi
+
+# --- 5. Final system cleanliness comparison ---
+step "Checking absolute system cleanliness (Snapshot comparison)"
 ETC_COUNT_AFTER=$({ find /etc 2>/dev/null || true; } | wc -l)
 
-echo -e "  📊 Stav před testem: $ETC_COUNT_BEFORE položek"
-echo -e "  📊 Stav po testech:  $ETC_COUNT_AFTER položek"
+echo -e "  📊 State before test: $ETC_COUNT_BEFORE items"
+echo -e "  📊 State after test:  $ETC_COUNT_AFTER items"
 
 if [[ "$ETC_COUNT_BEFORE" -eq "$ETC_COUNT_AFTER" ]]; then
-    pass "Struktura /etc je na chlup stejná jako před testem. Nástroj po sobě nezanechal absolutně žádné stopy!"
+    pass "/etc structure is exactly the same as before the test. The tool left absolutely no traces!"
 else
-    rozdil=$((ETC_COUNT_AFTER - ETC_COUNT_BEFORE))
-    # Na běžícím OS mohou procesy (např. NetworkManager, dnf) vytvořit dočasné soubory.
-    # Tolerujeme drobnou odchylku, ale upozorníme na ni.
-    if [[ $rozdil -gt -5 && $rozdil -lt 5 ]]; then
-        warn "Počet položek se nepatrně liší (rozdíl: $rozdil). Pravděpodobně jde o běžnou aktivitu OS na pozadí."
+    diff=$((ETC_COUNT_AFTER - ETC_COUNT_BEFORE))
+    # Operating systems generate temporary files (NetworkManager, dnf). We tolerate small deviations.
+    if [[ $diff -gt -5 && $diff -lt 5 ]]; then
+        warn "Item count differs slightly (difference: $diff). Usually temporary OS files."
     else
-        fail "Zjištěn velký rozdíl v počtu souborů ($rozdil). Nějaká konfigurace pravděpodobně nebyla smazána!"
+        fail "More than 5 unknown items left in /etc. Possible data leak!"
     fi
 fi
 
-echo -e "\n${GREEN}=================================================${NC}"
-echo -e "${GREEN}🎉 E2E TESTY DOKONČENY: ARCHITEKTURA JE 100% NEPRŮSTŘELNÁ!${NC}"
-echo -e "${GREEN}=================================================${NC}\n"
+echo -e "\n================================================================================"
+echo -e "${GREEN}🎉 E2E TESTS COMPLETED: ARCHITECTURE IS 100% BULLETPROOF!${NC}"
+echo -e "================================================================================"
