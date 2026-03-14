@@ -1,4 +1,4 @@
-# 📦 Sysext-Creator (v2.0)
+# 📦 Sysext-Creator (v2.0) still under development
 
 **Advanced system extension manager for atomic Fedora systems (Kinoite & Silverblue).**
 
