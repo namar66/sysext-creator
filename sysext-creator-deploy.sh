@@ -7,7 +7,6 @@ TRACKER_DIR="/var/lib/sysext-creator/trackers"
 LOG_FILE="/var/log/sysext-creator.log"
 REFRESH_NEEDED=0
 
-# Zajistíme, že složka existuje
 mkdir -p "$TRACKER_DIR"
 
 shopt -s nullglob
@@ -17,7 +16,7 @@ log() { echo "$(date '+%Y-%m-%d %H:%M:%S') INFO: $1" >> "$LOG_FILE"; }
 err() { echo "$(date '+%Y-%m-%d %H:%M:%S') ERROR: $1" >> "$LOG_FILE"; }
 
 # ======================================================================
-# A. ZPRACOVÁNÍ POŽADAVKŮ NA VERZI
+# A. VERSION REQUEST HANDLING
 # ======================================================================
 for req_file in "$STAGING_DIR"/*.version-req; do
     pkg_name=$(basename "$req_file" .version-req)
@@ -46,8 +45,15 @@ for req_file in "$STAGING_DIR"/*.version-req; do
 done
 
 # ======================================================================
-# B. ZPRACOVÁNÍ POŽADAVKŮ NA MAZÁNÍ (*.delete)
+# B. TRACKER PROCESSING & IMAGE DELETION
 # ======================================================================
+for tracker in "$STAGING_DIR"/*.etc.tracker; do
+    [[ ! -f "$tracker" ]] && continue
+    pkg_file=$(basename "$tracker")
+    mv "$tracker" "$TRACKER_DIR/$pkg_file"
+    chmod 0644 "$TRACKER_DIR/$pkg_file"
+done
+
 for del_file in "$STAGING_DIR"/*.delete; do
     pkg_name=$(basename "$del_file" .delete)
     [[ -z "$pkg_name" || "$pkg_name" == "*" ]] && { rm -f "$del_file"; continue; }
@@ -57,19 +63,17 @@ for del_file in "$STAGING_DIR"/*.delete; do
 
     local_tracker="$TRACKER_DIR/${pkg_name}.etc.tracker"
 
-    # Deep cleanup pro /etc
+    # Deep cleanup for /etc
     if grep -q "FORCE_ETC_CLEANUP" "$del_file" 2>/dev/null && [[ -f "$local_tracker" ]]; then
         log "Deep cleaning ALL /etc configuration for $pkg_name..."
         while IFS= read -r f; do
             [[ "$f" == /etc/* && "$f" != *..* ]] && rm -f "$f"
         done < "$local_tracker"
 
-        # Nejprve zpracujeme složky pomocí sed, dokud soubor existuje
         while IFS= read -r d; do
             [[ "$d" == /etc/* ]] && rmdir --ignore-fail-on-non-empty "$d" 2>/dev/null || true
         done < <(sed 's|/[^/]*$||' "$local_tracker" | sort -ru)
         
-        # Až teď tracker smažeme
         rm -f "$local_tracker"
 
     elif grep -q "SELECTED_ETC_CLEANUP" "$del_file" 2>/dev/null; then
@@ -88,7 +92,7 @@ for del_file in "$STAGING_DIR"/*.delete; do
 done
 
 # ======================================================================
-# D. VALIDACE A ATOMICKÁ INSTALACE NOVÝCH OBRAZŮ (*.raw)
+# C. ATOMIC VALIDATION AND DEPLOYMENT (*.raw)
 # ======================================================================
 for raw_file in "$STAGING_DIR"/*.raw; do
     [[ ! -s "$raw_file" ]] && { rm -f "$raw_file"; continue; }
@@ -96,7 +100,7 @@ for raw_file in "$STAGING_DIR"/*.raw; do
     pkg_file=$(basename "$raw_file")
     ext_name="${pkg_file%.raw}"
     base_pkg_name=$(echo "$ext_name" | sed -E 's/-fc[0-9]+$//')
-
+    
     log "Validating new extension before deployment: $pkg_file"
     validation_failed=0
 
@@ -110,7 +114,9 @@ for raw_file in "$STAGING_DIR"/*.raw; do
         release_path="/usr/lib/extension-release.d/extension-release.${ext_name}"
         img_ver=$(systemd-dissect --copy-from "$raw_file" "$release_path" - 2>/dev/null | grep "^VERSION_ID=" | cut -d'=' -f2 | tr -d '"' || true)
 
-        if [[ "$img_ver" != "$host_ver" ]]; then
+        if [[ "$base_pkg_name" == "sysext-creator" ]]; then
+            log "Bypassing VERSION_ID check for OS-agnostic package: $pkg_file"
+        elif [[ "$img_ver" != "$host_ver" ]]; then
             err "Validation failed: $pkg_file OS version mismatch (Image: $img_ver, Host: $host_ver)."
             validation_failed=1
         fi
@@ -145,16 +151,11 @@ for raw_file in "$STAGING_DIR"/*.raw; do
             restorecon "$EXT_DIR/$pkg_file" || err "Failed to restorecon $pkg_file"
         fi
 
-        # ATOMICKÁ INSTALACE KONFIGURACE (Teprve nyní, když je obraz bezpečně v systému)
+        # Extract /etc configuration only AFTER image is safely deployed
         if [[ -s "$STAGING_DIR/${base_pkg_name}.etc.tar.gz" ]]; then
             log "Extracting /etc configuration for: $base_pkg_name"
             tar -xzf "$STAGING_DIR/${base_pkg_name}.etc.tar.gz" -C /etc/ 2>/dev/null || err "Failed to extract config"
             rm -f "$STAGING_DIR/${base_pkg_name}.etc.tar.gz"
-        fi
-
-        if [[ -f "$STAGING_DIR/${base_pkg_name}.etc.tracker" ]]; then
-            mv "$STAGING_DIR/${base_pkg_name}.etc.tracker" "$TRACKER_DIR/${base_pkg_name}.etc.tracker"
-            chmod 0644 "$TRACKER_DIR/${base_pkg_name}.etc.tracker"
         fi
 
         REFRESH_NEEDED=1
@@ -164,15 +165,18 @@ for raw_file in "$STAGING_DIR"/*.raw; do
 done
 
 # ======================================================================
-# E. AKTUALIZACE SYSTEMD-SYSEXT
+# D. UPDATE SYSTEMD-SYSEXT AND RELOAD DAEMON
 # ======================================================================
 if [[ $REFRESH_NEEDED -eq 1 ]]; then
     log "Refreshing systemd-sysext..."
     systemd-sysext refresh >> "$LOG_FILE" 2>&1 || err "systemd-sysext refresh failed"
+    
+    log "Reloading systemd daemon to pick up new units..."
+    systemctl daemon-reload || err "systemctl daemon-reload failed"
 fi
 
 # ======================================================================
-# F. DIAGNOSTIKA (DOCTOR)
+# E. DIAGNOSTICS (DOCTOR) WITH ATOMIC WRITE
 # ======================================================================
 if [[ -f "$STAGING_DIR/doctor.req" ]]; then
     log "Running Sysext Doctor diagnostics..."
@@ -206,7 +210,10 @@ if [[ -f "$STAGING_DIR/doctor.req" ]]; then
                     has_errors=1
                 else
                     img_ver=$(systemd-dissect --copy-from "$img" "/$release_file" - 2>/dev/null | grep "^VERSION_ID=" | cut -d'=' -f2 | tr -d '"' || true)
-                    if [[ "$img_ver" != "$host_ver" ]]; then
+                    
+                    if [[ "$img_name" == "sysext-creator"* ]]; then
+                        echo "✅ Label: OS-Agnostic package (ID=_any), VERSION_ID check bypassed."
+                    elif [[ "$img_ver" != "$host_ver" ]]; then
                         echo "⚠️  WARNING: Image version ($img_ver) does not match the host ($host_ver)!"
                         has_errors=1
                     else
@@ -248,7 +255,6 @@ if [[ -f "$STAGING_DIR/doctor.req" ]]; then
         fi
     } > "$tmp_res" 2>&1
 
-    # Atomické přesunutí až po kompletním zápisu
     chmod 0666 "$tmp_res" 2>/dev/null || true
     mv "$tmp_res" "$res_file"
     rm -f "$STAGING_DIR/doctor.req"
