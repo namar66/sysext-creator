@@ -12,6 +12,13 @@ if [[ "${1:-}" == "uninstall" ]]; then
     sudo systemctl disable sysext-creator-deploy.path sysext-creator-deploy.service 2>/dev/null || true
     sudo rm -f /etc/systemd/system/sysext-creator-deploy.path
     sudo rm -f /etc/systemd/system/sysext-creator-deploy.service
+
+    # Cleanup legacy Healer
+    sudo systemctl stop sysext-creator-heal.service sysext-creator-heal.timer 2>/dev/null || true
+    sudo systemctl disable sysext-creator-heal.service sysext-creator-heal.timer 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/sysext-creator-heal.service
+    sudo rm -f /etc/systemd/system/sysext-creator-heal.timer
+    sudo rm -f /usr/local/bin/sysext-creator-healer
     sudo systemctl daemon-reload
 
     echo "=> Removing host daemon..."
@@ -60,7 +67,7 @@ fi
 # ======================================================================
 # INSTALL LOGIC
 # ======================================================================
-echo "🚀 Starting Sysext-Creator environment setup (v2.0.1)..."
+echo "🚀 Starting Sysext-Creator environment setup (v2.0)..."
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
 HOST_VERSION=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
@@ -73,6 +80,13 @@ if [ ! -d "$EXT_DIR" ]; then
     sudo mkdir -p "$EXT_DIR"
     sudo chmod 0755 "$EXT_DIR"
 fi
+
+echo "=> Cleaning up deprecated legacy services (Auto-Healer)..."
+sudo systemctl stop sysext-creator-heal.service sysext-creator-heal.timer 2>/dev/null || true
+sudo systemctl disable sysext-creator-heal.service sysext-creator-heal.timer 2>/dev/null || true
+sudo rm -f /etc/systemd/system/sysext-creator-heal.service
+sudo rm -f /etc/systemd/system/sysext-creator-heal.timer
+sudo rm -f /usr/local/bin/sysext-creator-healer
 
 echo "=> Installing deployment daemon (requires sudo)..."
 if [[ ! -f "$SCRIPT_DIR/sysext-creator-deploy.sh" ]]; then
