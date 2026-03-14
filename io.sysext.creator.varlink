@@ -1,0 +1,18 @@
+# Interface for Sysext-Creator v3.0
+interface io.sysext.creator
+
+# Returns metadata about the host system
+method GetHostInfo() -> (
+    version_id: string,
+    architecture: string,
+    kernel: string
+)
+
+# Deploys a system extension image to /var/lib/extensions
+method DeploySysext(name: string, path: string) -> (status: string)
+
+# Deploys a configuration extension image to /var/lib/confexts
+method DeployConfext(name: string, path: string) -> (status: string)
+
+error DeploymentError(reason: string)
+error FileNotFound(path: string)
