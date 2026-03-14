@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Sysext-Creator-Core (v2.0 - Pure Podman Edition)
+# Sysext-Creator-Core (v2.0.1 - Pure Podman Edition)
 # Runs exclusively inside the persistent podman container.
 ################################################################################
 
@@ -95,7 +95,6 @@ cmd_install() {
     info "Reading resolved dependencies from host tunnel..."
     local deps="${RESOLVED_DEPS:-}"
 
-    # --- LOGIKA PRO SPECIAL PACKAGES (Přesunuto sem dolů!) ---
     if [[ " ${SPECIAL_PACKAGES[*]} " =~ " ${package} " ]]; then
         if [[ "$package" == "sysext-creator" ]]; then
             if grep -iq "kinoite" /run/host/etc/os-release || [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]]; then
@@ -107,22 +106,19 @@ cmd_install() {
             fi
         fi
     fi
-    # ---------------------------------------------------------
 
     [[ -z "$deps" || "$deps" == " " ]] && deps="$package"
 
     info "Downloading and extracting RPM packages..."
     dnf download $deps --refresh --forcearch="$(uname -m)" --exclude="*.i686" --destdir="$WORKDIR/rpms" >/dev/null
     for rpm in "$WORKDIR/rpms"/*.rpm; do rpm2cpio "$rpm" | cpio -idm -D "$WORKDIR" --quiet 2>/dev/null; done
+    
     info "Resolving base system conflicts (Smart Pruning)..."
     local map_file="$STAGING_DIR/host_usr_files.txt"
 
     if [[ -f "$map_file" ]]; then
         find "$WORKDIR/usr" \( -type f -o -type l \) 2>/dev/null | while read -r filepath; do
-            # Odřízneme cestu $WORKDIR, abychom dostali jen např. "/usr/bin/encguess"
             relative_path="${filepath#$WORKDIR}"
-
-            # Rychlé prohledání textového souboru (přesná shoda celého řádku)
             if grep -F -x -q "$relative_path" "$map_file"; then
                 rm -f "$filepath"
             fi
@@ -135,12 +131,10 @@ cmd_install() {
 cmd_install_local() {
     local rpm_path="$1" host_version="$2"
 
-    # --- KOUZLO 2.0: Autodetekce cesty z hostitele ---
     if [[ ! -f "$rpm_path" && -f "/run/host${rpm_path}" ]]; then
         info "Translating host path to container path..."
         rpm_path="/run/host${rpm_path}"
     fi
-    # -------------------------------------------------
 
     [[ ! -f "$rpm_path" ]] && die "File not found: $rpm_path"
 
@@ -177,23 +171,17 @@ cmd_install_local() {
 
 process_extension() {
     local package="$1" host_version="$2" available_v="$3" mode="$4"
-
     local ext_name="${package}-fc${host_version}"
 
-    # --- Generate extension release label ---
     mkdir -p "$WORKDIR/usr/lib/extension-release.d"
-       if [[ "$package" == "sysext-creator" ]]; then
-        # OS-agnostic label for the creator tool itself
+    
+    if [[ "$package" == "sysext-creator" ]]; then
         local release_file="$WORKDIR/usr/lib/extension-release.d/extension-release.sysext-creator"
-        echo "ID=_any" > "$release_file"
-        echo "SYSEXT_SCOPE=system" >> "$release_file"
-        echo "SYSEXT_VERSION_ID=$available_v" >> "$release_file"
+        echo -e "ID=_any\nSYSEXT_SCOPE=system\nSYSEXT_VERSION_ID=$available_v" > "$release_file"
+        ext_name="sysext-creator"
     else
-        # Standard strict OS label for normal packages
-        local release_file="$WORKDIR/usr/lib/extension-release.d/extension-release.${package}-fc${host_version}"
-        echo "ID=fedora" > "$release_file"
-        echo "SYSEXT_SCOPE=system" >> "$release_file"
-        echo "VERSION_ID=$host_version" >> "$release_file"
+        local release_file="$WORKDIR/usr/lib/extension-release.d/extension-release.${ext_name}"
+        echo -e "ID=fedora\nVERSION_ID=$host_version\nSYSEXT_VERSION_ID=$available_v" > "$release_file"
     fi
 
     if [[ "$mode" != "update" ]] && ! [[ " ${SPECIAL_PACKAGES[*]} " =~ " ${package} " ]] && [[ -d "$WORKDIR/etc" ]]; then
@@ -201,7 +189,6 @@ process_extension() {
         tar -czf "$WORKDIR/${package}.etc.tar.gz" -C "$WORKDIR/etc" .
         mv "$WORKDIR/${package}.etc.tar.gz" "$STAGING_DIR/"
 
-        # Novinka: Tracker pošleme rovnou do Stagingu k démonovi
         find "$WORKDIR/etc" ! -type d | sed "s|$WORKDIR||" > "$STAGING_DIR/${package}.etc.tracker"
         rm -rf "$WORKDIR/etc"
     fi
