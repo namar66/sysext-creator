@@ -4,7 +4,8 @@ Description=Monitor sysext staging directory
 [Path]
 PathChanged=/var/tmp/sysext-staging
 MakeDirectory=yes
-DirectoryMode=0777
+# FIX: Added Sticky Bit (1) to prevent symlink attacks and LPE vulnerabilities
+DirectoryMode=1777
 
 [Install]
 WantedBy=multi-user.target
