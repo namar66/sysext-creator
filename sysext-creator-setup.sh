@@ -1,9 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# ======================================================================
+# ==========================================
 # UNINSTALL LOGIC
-# ======================================================================
+# ==========================================
 if [[ "${1:-}" == "uninstall" ]]; then
     echo "🧹 Starting complete removal of local Sysext-Creator installation..."
 
@@ -12,13 +12,6 @@ if [[ "${1:-}" == "uninstall" ]]; then
     sudo systemctl disable sysext-creator-deploy.path sysext-creator-deploy.service 2>/dev/null || true
     sudo rm -f /etc/systemd/system/sysext-creator-deploy.path
     sudo rm -f /etc/systemd/system/sysext-creator-deploy.service
-
-    # Cleanup legacy Healer
-    sudo systemctl stop sysext-creator-heal.service sysext-creator-heal.timer 2>/dev/null || true
-    sudo systemctl disable sysext-creator-heal.service sysext-creator-heal.timer 2>/dev/null || true
-    sudo rm -f /etc/systemd/system/sysext-creator-heal.service
-    sudo rm -f /etc/systemd/system/sysext-creator-heal.timer
-    sudo rm -f /usr/local/bin/sysext-creator-healer
     sudo systemctl daemon-reload
 
     echo "=> Removing host daemon..."
@@ -28,7 +21,6 @@ if [[ "${1:-}" == "uninstall" ]]; then
     rm -f "$HOME/.local/bin/sysext-creator"
     rm -f "$HOME/.local/bin/sysext-creator-core"
     rm -f "$HOME/.local/bin/sysext-gui"
-    rm -f "$HOME/.local/bin/sysext-gui-wrapper-gui"
     rm -f "$HOME/.local/bin/sysext-creator-test"
 
     echo "=> Removing desktop integration, menu, and bash completion..."
@@ -36,7 +28,7 @@ if [[ "${1:-}" == "uninstall" ]]; then
     rm -f "$HOME/.local/share/icons/hicolor/512x512/apps/sysext-creator-icon.png"
     rm -f "$HOME/.local/share/kio/servicemenus/sysext-creator-install.desktop"
     rm -f "$HOME/.local/share/bash-completion/completions/sysext-creator"
-
+    
     if command -v kbuildsycoca6 &> /dev/null; then
         kbuildsycoca6 &>/dev/null || true
         echo "✅ KDE menu updated."
@@ -52,7 +44,8 @@ if [[ "${1:-}" == "uninstall" ]]; then
         sudo rm -f /var/lib/extensions/*.raw
     else
         echo "=> Keeping user images, removing only Sysext-Creator itself..."
-        sudo rm -f /var/lib/extensions/sysext-creator*.raw
+        sudo rm -f /var/lib/extensions/sysext-creator-fc*.raw
+        sudo rm -f /var/lib/extensions/sysext-creator.raw 2>/dev/null || true
     fi
 
     echo "=> Unmounting system extensions..."
@@ -64,14 +57,12 @@ if [[ "${1:-}" == "uninstall" ]]; then
     exit 0
 fi
 
-# ======================================================================
+# ==========================================
 # INSTALL LOGIC
-# ======================================================================
+# ==========================================
 echo "🚀 Starting Sysext-Creator environment setup (v2.0)..."
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
-HOST_VERSION=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
-STAGING_DIR="/var/tmp/sysext-staging"
 EXT_DIR="/var/lib/extensions"
 
 if [ ! -d "$EXT_DIR" ]; then
@@ -80,13 +71,6 @@ if [ ! -d "$EXT_DIR" ]; then
     sudo mkdir -p "$EXT_DIR"
     sudo chmod 0755 "$EXT_DIR"
 fi
-
-echo "=> Cleaning up deprecated legacy services (Auto-Healer)..."
-sudo systemctl stop sysext-creator-heal.service sysext-creator-heal.timer 2>/dev/null || true
-sudo systemctl disable sysext-creator-heal.service sysext-creator-heal.timer 2>/dev/null || true
-sudo rm -f /etc/systemd/system/sysext-creator-heal.service
-sudo rm -f /etc/systemd/system/sysext-creator-heal.timer
-sudo rm -f /usr/local/bin/sysext-creator-healer
 
 echo "=> Installing deployment daemon (requires sudo)..."
 if [[ ! -f "$SCRIPT_DIR/sysext-creator-deploy.sh" ]]; then
@@ -98,6 +82,7 @@ sudo cp "$SCRIPT_DIR/sysext-creator-deploy.sh" /usr/local/bin/sysext-creator-dep
 sudo chown root:root /usr/local/bin/sysext-creator-deploy.sh
 sudo chmod +x /usr/local/bin/sysext-creator-deploy.sh
 
+# Writing robust service and path files directly
 sudo tee /etc/systemd/system/sysext-creator-deploy.service > /dev/null << 'EOF'
 [Unit]
 Description=Deploy staged systemd-sysext images
@@ -148,20 +133,20 @@ if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] || pgrep -x plasmashell > /dev/nu
     echo "=> KDE environment detected. Adding context menu to Dolphin..."
     SERVICE_DIR="$HOME/.local/share/kio/servicemenus/"
     mkdir -p "$SERVICE_DIR"
-    cp "$SCRIPT_DIR/sysext-creator-install.desktop" "$HOME/.local/share/kio/servicemenus/sysext-creator-install.desktop"
-    chmod +x "$HOME/.local/share/kio/servicemenus/sysext-creator-install.desktop"
+    cp "$SCRIPT_DIR/sysext-creator-install.desktop" "$HOME/.local/share/kio/servicemenus/sysext-creator-install.desktop" 2>/dev/null || true
+    chmod +x "$HOME/.local/share/kio/servicemenus/sysext-creator-install.desktop" 2>/dev/null || true
     echo "✅ Action for .rpm files successfully added."
     
     echo "=> Setting up GUI application..."
     cp "$SCRIPT_DIR/sysext-gui" "$HOME/.local/bin/"
-    cp "$SCRIPT_DIR/sysext-gui-wrapper-gui.sh" "$HOME/.local/bin/sysext-gui-wrapper"
-    chmod +x "$HOME/.local/bin/sysext-gui" "$HOME/.local/bin/sysext-gui-wrapper"
+    cp "$SCRIPT_DIR/sysext-gui-wrapper-gui.sh" "$HOME/.local/bin/sysext-gui-wrapper-gui" 2>/dev/null || true
+    chmod +x "$HOME/.local/bin/sysext-gui" "$HOME/.local/bin/sysext-gui-wrapper-gui" 2>/dev/null || true
 
     echo "=> Installing desktop entry and icon..."
     mkdir -p "$HOME/.local/share/applications"
     mkdir -p "$HOME/.local/share/icons/hicolor/512x512/apps"
-    cp "$SCRIPT_DIR/sysext-creator-icon.png" "$HOME/.local/share/icons/hicolor/512x512/apps/"
-    cp "$SCRIPT_DIR/sysext-creator.desktop" "$HOME/.local/share/applications/"
+    cp "$SCRIPT_DIR/sysext-creator-icon.png" "$HOME/.local/share/icons/hicolor/512x512/apps/" 2>/dev/null || true
+    cp "$SCRIPT_DIR/sysext-creator.desktop" "$HOME/.local/share/applications/" 2>/dev/null || true
     
     if command -v kbuildsycoca6 &> /dev/null; then
         kbuildsycoca6 &>/dev/null || true
