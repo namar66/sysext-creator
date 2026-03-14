@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# Sysext-Creator Wrapper (v2.0 - Pure Podman Edition)
+# Sysext-Creator Wrapper (v2.0.1 - Pure Podman Edition)
 ################################################################################
 
 set -euo pipefail
@@ -10,25 +10,19 @@ HOST_VERSION=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
 CONTAINER_NAME="sysext-box-fc${HOST_VERSION}"
 STAGING_DIR="/var/tmp/sysext-staging"
 
-# Chytrá autodetekce jádra
 if ! RAW_CORE_PATH=$(command -v sysext-creator-core 2>/dev/null); then
     echo "❌ Error: sysext-creator-core not found in PATH."
     exit 1
 fi
 
-# Získáme absolutní cestu (pojistka proti symlinkům)
 HOST_CORE_PATH=$(realpath "$RAW_CORE_PATH")
-
-# Jelikož čistý Podman nemá automaticky namapovanou domovskou složku,
-# musíme hostitelskou cestu VŽDY hledat přes náš namapovaný root (/run/host)
 CORE_EXEC="/run/host${HOST_CORE_PATH}"
 
 # ======================================================================
-# POMOCNÉ FUNKCE NA HOSTITELI (Mimo kontejner)
+# HOST HELPERS (Outside container)
 # ======================================================================
 resolve_deps() {
     local target="$1"
-    # Voláme rpm-ostree BEZPEČNĚ přímo na hostiteli
     rpm-ostree install --dry-run "$target" 2>/dev/null | sed -n -e '/packages:/,$p' -e '/^Added:/,$p' | grep -E '^  [a-zA-Z0-9]' | awk '{print $1}' | sed -E 's/-[0-9].*//' | sort -u | tr '\n' ' ' || true
 }
 
@@ -77,7 +71,7 @@ get_installed_version() {
 
 cmd_list() {
     echo "=> Listing installed system extensions:"
-    local packages=$(find "/var/lib/extensions" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | sed 's/-fc[0-9]\+$//' | sort -u | tr -d '\r')
+    local packages=$(find "/var/lib/extensions" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | sed -E 's/-fc[0-9]+$//' | sort -u | tr -d '\r')
 
     if [[ -z "$packages" ]]; then
         echo "📋 No packages are installed."
@@ -128,7 +122,6 @@ cmd_remove() {
                     del_payload="SELECTED_ETC_CLEANUP\n"
                     echo "=> Vybírání souborů ke smazání:"
                     while IFS= read -r f; do
-                        # OPRAVA BASH PASTI: čteme přímo z terminálu, nikoliv z tracker souboru
                         read -p "  🗑️ Smazat $f? [y/N]: " subchoice </dev/tty
                         if [[ "${subchoice,,}" == "y" ]]; then
                             del_payload="${del_payload}${f}\n"
@@ -201,7 +194,7 @@ check_container() {
 }
 
 # ======================================================================
-# HLAVNÍ LOGIKA (Vstupní bod)
+# MAIN LOGIC
 # ======================================================================
 main() {
     [[ $# -lt 1 ]] && { echo "Usage: sysext-creator install|install-local|update|check-update|rm|list|search|doctor [package/path]"; exit 1; }
@@ -210,43 +203,59 @@ main() {
     check_container
 
     local cmd="$1"
-    local pkgs=$(find "/var/lib/extensions" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | sed 's/-fc[0-9]\+$//' | sort -u | tr -d '\r' | tr '\n' ' ' || true)
 
     case "$cmd" in
-       install|install-local)
-            pkgs="${@:2}"
+        install|install-local)
+            local pkgs="${@:2}"
             if [[ -z "$pkgs" || "$pkgs" == " " ]]; then
                 echo "❌ Error: Please specify a package name or path."
                 exit 1
             fi
 
-            echo "=> Vytvářím mapu hostitelského systému pro chytré prořezávání..."
+            echo "=> Creating host system map for smart pruning..."
             rpm -qal 2>/dev/null | grep '^/usr/' > "$STAGING_DIR/host_usr_files.txt" || true
 
             for target in $pkgs; do
-                if [[ "$COMMAND" == "install-local" ]]; then
-                    abs_path=$(realpath "$target")
+                if [[ "$cmd" == "install-local" ]]; then
+                    local abs_path=$(realpath "$target")
                     podman exec -i "$CONTAINER_NAME" "$CORE_EXEC" install-local "$abs_path"
                 else
                     echo "=> Resolving dependencies for $target via host system..."
-                    deps=$(resolve_deps "$target")
+                    local deps=$(resolve_deps "$target")
                     podman exec -e RESOLVED_DEPS="$deps" -i "$CONTAINER_NAME" "$CORE_EXEC" install "$target"
                 fi
             done
             ;;
         update)
-            if [[ -z "$pkgs" || "$pkgs" == " " ]]; then
+            local installed_pkgs=$(find "/var/lib/extensions" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | sed -E 's/-fc[0-9]+$//' | sort -u | tr -d '\r' | tr '\n' ' ' || true)
+            
+            if [[ -z "$installed_pkgs" || "$installed_pkgs" == " " ]]; then
                 echo "📋 No packages installed for update."
                 exit 0
             fi
-            for target in $pkgs; do
+
+            # Safe sorting: push sysext-creator to the very end
+            local sorted_pkgs=""
+            local creator_pkg=""
+            for p in $installed_pkgs; do
+                if [[ "$p" == "sysext-creator" ]]; then
+                    creator_pkg="sysext-creator"
+                else
+                    sorted_pkgs="$sorted_pkgs $p "
+                fi
+            done
+            local final_pkgs="${sorted_pkgs}${creator_pkg}"
+
+            for target in $final_pkgs; do
+                [[ -z "$target" || "$target" == " " ]] && continue
                 echo "=> Resolving dependencies for $target via host system..."
                 local deps=$(resolve_deps "$target")
                 podman exec -e RESOLVED_DEPS="$deps" -i "$CONTAINER_NAME" "$CORE_EXEC" update-single "$target"
             done
             ;;
         check-update)
-            podman exec -e HOST_PKGS="$pkgs" -i "$CONTAINER_NAME" "$CORE_EXEC" "$@"
+            local installed_pkgs=$(find "/var/lib/extensions" -maxdepth 1 -name "*.raw" -type f 2>/dev/null | xargs -r -n1 basename -s .raw | sed -E 's/-fc[0-9]+$//' | sort -u | tr -d '\r' | tr '\n' ' ' || true)
+            podman exec -e HOST_PKGS="$installed_pkgs" -i "$CONTAINER_NAME" "$CORE_EXEC" "$@"
             ;;
         search)
             podman exec -i "$CONTAINER_NAME" "$CORE_EXEC" "$@"
@@ -260,7 +269,6 @@ main() {
 
 COMMAND="${1:-}"
 
-# Rychlé odchycení příkazů, které nepotřebují kontejner (OBROVSKÉ zrychlení)
 if [[ "$COMMAND" == "doctor" ]] || [[ "$COMMAND" == "audit" ]]; then
     cmd_doctor
     exit 0
@@ -272,5 +280,4 @@ elif [[ "$COMMAND" == "rm" ]]; then
     exit 0
 fi
 
-# Pokud to není ani jeden z výše uvedených, předáme kontrolu funkci main (kontejneru)
 main "$@"
