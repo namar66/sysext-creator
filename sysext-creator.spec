@@ -1,8 +1,8 @@
 %bcond_without deps
 Name:           sysext-creator
 Version:        2.0.0
-Release:        10%{?dist}
-Summary:        Správce systémových rozšíření pro Fedoru Kinoite/Silverblue
+Release:        11%{?dist}
+Summary:        System Extension Manager for Fedora Kinoite/Silverblue
 
 License:        MIT
 URL:            https://github.com/tvoje-jmeno/sysext-creator
@@ -12,12 +12,12 @@ BuildArch:      noarch
 BuildRequires:  systemd-rpm-macros
 BuildRequires:	desktop-file-utils
 BuildRequires:	libappstream-glib
-# Závislosti, které musí hostitelský systém mít (aby fungovalo GUI a wrapper)
+# Dependencies that the host system must have
 Requires:       libnotify
 
 %description
-Grafický a CLI správce pro tvorbu, nasazování a správu atomických systémových
-rozšíření (systemd-sysext) pomocí kontejnerů Distrobox.
+Graphical and CLI manager for creating,
+deploying and managing atomic system extensions (systemd-sysext) using Podman containers.
 
 
 %package kinoite
@@ -33,30 +33,29 @@ This package contains KDE GUI integration
 %setup -q
 
 %build
-# Jedná se o bash a python skripty, není potřeba nic kompilovat.
+# These are bash and python scripts, no need to compile anything.
 
 %install
 rm -rf $RPM_BUILD_ROOT
 
-# 1. HLAVNÍ NÁSTROJE (Wrapper, Core, GUI)
+# 1. MAIN TOOLS (Wrapper, Core, GUI)
 install -D -m 755 sysext-creator.sh %{buildroot}%{_bindir}/sysext-creator
 install -D -m 755 sysext-creator-core.sh %{buildroot}%{_bindir}/sysext-creator-core
 install -D -m 755 sysext-gui %{buildroot}%{_bindir}/sysext-gui
 install -D -m 755 setup-raw.sh %{buildroot}%{_bindir}/sysext-creator-setup
 install -D -m 755 sysext-gui-wrapper-gui.sh %{buildroot}%{_bindir}/sysext-gui-wrapper
 install -D -m 755 sysext-creator-test.sh %{buildroot}%{_bindir}/sysext-creator-test
-# 2. DÉMON (Logika pro práva roota)
-# Standardně démoni nepatří do /usr/bin, ale do libexec
+# 2. DAEMON (Logic for root privileges) 
 install -D -m 755 sysext-creator-deploy.sh %{buildroot}%{_libexecdir}/%{name}/sysext-creator-deploy
 
-# 3. SYSTEMD UNITS (Musí jít do /usr/lib/systemd/..., NE do /etc/!)
+# 3. SYSTEMD UNITS
 install -D -m 644 sysext-creator-deploy.service %{buildroot}%{_unitdir}/sysext-creator-deploy.service
 install -D -m 644 sysext-creator-deploy.path %{buildroot}%{_unitdir}/sysext-creator-deploy.path
 
-# 4. DESKTOP INTEGRACE
-# Zástupce pro GUI aplikaci
+# 4. DESKTOP INTEGRATION 
+# Shortcut for GUI application
 install -D -m 644 sysext-creator.desktop %{buildroot}%{_datadir}/applications/sysext-creator.desktop
-# Ikona do správné hicolor složky (aby ji KDE hned našlo i z .raw obrazu)
+# Icon to the correct hicolor folder (so that KDE can find it right away even from the .raw image)
 install -D -m 644 sysext-creator-icon.png %{buildroot}%{_datadir}/icons/hicolor/512x512/apps/sysext-creator-icon.png
 # Dolphin Service Menu
 install -D -m 644 sysext-creator-install.desktop %{buildroot}%{_datadir}/kio/servicemenus/sysext-creator-install.desktop
@@ -73,11 +72,9 @@ appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/*.metainfo.xml
 desktop-file-validate %{buildroot}%{_datadir}/applications/*.desktop
 
 %post
-# Zaregistruje a spustí systemd path unit po instalaci balíčku
 %systemd_post sysext-creator-deploy.path
 
 %preun
-# Zastaví démony před odinstalací
 %systemd_preun sysext-creator-deploy.path
 %systemd_preun sysext-creator-deploy.service
 
@@ -85,7 +82,6 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/*.desktop
 %systemd_postun_with_restart sysext-creator-deploy.path
 
 %files
-# Zde deklarujeme, že všechny tyto soubory balíček vlastní
 %{_bindir}/sysext-creator
 %{_bindir}/sysext-creator-core
 %{_bindir}/sysext-creator-setup
@@ -97,6 +93,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/*.desktop
 %{_userunitdir}/sysext-update.service
 %{_userunitdir}/sysext-update.timer
 %{_metainfodir}/*.metainfo.xml
+
 %files kinoite
 %{_bindir}/sysext-gui
 %{_bindir}/sysext-gui-wrapper
