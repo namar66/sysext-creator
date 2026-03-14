@@ -31,7 +31,7 @@ pass "Tool and daemon are ready."
 
 step "Pre-test cleanup"
 for pkg in "$PKG_SIMPLE" "$PKG_COMPLEX"; do
-    if sysext-creator list | grep -q "$pkg"; then
+    if sysext-creator list | grep "$pkg"; then
         sysext-creator rm "$pkg" yes >/dev/null
     fi
 done
