@@ -107,29 +107,29 @@ cmd_remove() {
         if [[ "$auto_yes" == "yes" || "$auto_yes" == "true" ]]; then
             del_payload="FORCE_ETC_CLEANUP\n"
         else
-            echo -e "\n📦 Balíček '$pkg' vytvořil tyto konfigurační soubory:"
+            echo -e "\n📦 Package '$pkg' deployed following configuration files:"
             while IFS= read -r f; do
                 echo "  📄 $f"
             done < "$tracker_file"
             echo ""
 
-            read -p "Chceš je také trvale smazat? [Y(vše) / N(nic) / S(vybrat ručně)]: " choice
+            read -p "Do you want to permanently delete them? [Y(all) / N(none) / S(select)]: " choice
             case "${choice,,}" in
                 y|yes)
                     del_payload="FORCE_ETC_CLEANUP\n"
                     ;;
                 s|select)
                     del_payload="SELECTED_ETC_CLEANUP\n"
-                    echo "=> Vybírání souborů ke smazání:"
+                    echo "=> Selecting files to delete:"
                     while IFS= read -r f; do
-                        read -p "  🗑️ Smazat $f? [y/N]: " subchoice </dev/tty
+                        read -p "  🗑️ Delete $f? [y/N]: " subchoice </dev/tty
                         if [[ "${subchoice,,}" == "y" ]]; then
                             del_payload="${del_payload}${f}\n"
                         fi
                     done < "$tracker_file"
                     ;;
                 *)
-                    echo "=> Ponechávám konfigurační soubory v systému (/etc/)."
+                    echo "=> Keeping configuration files in /etc/."
                     ;;
             esac
         fi
@@ -159,9 +159,10 @@ check_container() {
     if ! podman ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
         recreate=1
     else
+        # KOMPLEXNÍ KONTROLA MOUNT POINTŮ (Zabrání selhání mkfs.erofs)
         local mounts=$(podman inspect "$CONTAINER_NAME" --format '{{.Mounts}}' 2>/dev/null || true)
-        if [[ "$mounts" != *"$STAGING_DIR"* ]] || [[ "$mounts" != *"/run/host"* ]]; then
-            echo "⚠️ Container $CONTAINER_NAME is missing required mounts. Rebuilding..."
+        if [[ "$mounts" != *"$STAGING_DIR"* ]] || [[ "$mounts" != *"/run/host"* ]] || [[ "$mounts" != *"/tmp/file_contexts"* ]]; then
+            echo "⚠️ Container $CONTAINER_NAME is missing required mounts (e.g. SELinux contexts). Rebuilding..."
             podman rm -f "$CONTAINER_NAME" >/dev/null 2>&1
             recreate=1
         else
