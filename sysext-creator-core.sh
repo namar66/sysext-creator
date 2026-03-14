@@ -180,8 +180,21 @@ process_extension() {
 
     local ext_name="${package}-fc${host_version}"
 
+    # --- Generate extension release label ---
     mkdir -p "$WORKDIR/usr/lib/extension-release.d"
-    echo -e "ID=fedora\nVERSION_ID=$host_version\nSYSEXT_VERSION_ID=$available_v" > "$WORKDIR/usr/lib/extension-release.d/extension-release.${ext_name}"
+       if [[ "$package" == "sysext-creator" ]]; then
+        # OS-agnostic label for the creator tool itself
+        local release_file="$WORKDIR/usr/lib/extension-release.d/extension-release.sysext-creator"
+        echo "ID=_any" > "$release_file"
+        echo "SYSEXT_SCOPE=system" >> "$release_file"
+        echo "SYSEXT_VERSION_ID=$available_v" >> "$release_file"
+    else
+        # Standard strict OS label for normal packages
+        local release_file="$WORKDIR/usr/lib/extension-release.d/extension-release.${package}-fc${host_version}"
+        echo "ID=fedora" > "$release_file"
+        echo "SYSEXT_SCOPE=system" >> "$release_file"
+        echo "VERSION_ID=$host_version" >> "$release_file"
+    fi
 
     if [[ "$mode" != "update" ]] && ! [[ " ${SPECIAL_PACKAGES[*]} " =~ " ${package} " ]] && [[ -d "$WORKDIR/etc" ]]; then
         info "Processing configuration files from /etc..."
