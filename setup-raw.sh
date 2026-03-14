@@ -1,139 +1,78 @@
 #!/bin/bash
 set -euo pipefail
 
-# ==========================================
-# UNINSTALL LOGIKA
-# ==========================================
+# ======================================================================
+# UNINSTALL LOGIC
+# ======================================================================
 if [[ "${1:-}" == "uninstall" ]]; then
-    echo "🧹 Zahajuji kompletní a bezpečné odstranění Sysext-Creator..."
+    echo "🧹 Starting complete and safe removal of Sysext-Creator..."
 
-    echo "=> Vypínám služby a časovače..."
+    echo "=> Stopping services and timers..."
     systemctl --user stop sysext-update.timer sysext-update.service 2>/dev/null || true
     systemctl --user disable sysext-update.timer 2>/dev/null || true
 
-    sudo systemctl stop sysext-creator-heal.service 2>/dev/null || true
-    sudo systemctl disable sysext-creator-heal.service 2>/dev/null || true
+    # Cleanup legacy Healer
+    sudo systemctl stop sysext-creator-heal.service sysext-creator-heal.timer 2>/dev/null || true
+    sudo systemctl disable sysext-creator-heal.service sysext-creator-heal.timer 2>/dev/null || true
     sudo rm -f /etc/systemd/system/sysext-creator-heal.service
+    sudo rm -f /etc/systemd/system/sysext-creator-heal.timer
     sudo rm -f /usr/local/bin/sysext-creator-healer
-    sudo systemctl daemon-reload
 
+    sudo systemctl stop sysext-creator-deploy.path sysext-creator-deploy.service 2>/dev/null || true
+    sudo systemctl disable sysext-creator-deploy.path sysext-creator-deploy.service 2>/dev/null || true
     sudo rm -f /etc/systemd/system/sysext-creator-deploy.path
     sudo rm -f /etc/systemd/system/sysext-creator-deploy.service
+    sudo systemctl daemon-reload
 
     echo ""
     read -p "Do you want to remove ALL installed raw images in /var/lib/extensions? (yes/no): " remove_all
     if [[ "$remove_all" == "yes" ]]; then
-        echo "=> Odstraňuji VŠECHNY RAW obrazy..."
+        echo "=> Removing ALL RAW images..."
         sudo rm -f /var/lib/extensions/*.raw
     else
-        echo "=> Odstraňuji pouze Sysext-Creator..."
+        echo "=> Removing only Sysext-Creator..."
         sudo rm -f /var/lib/extensions/sysext-creator*.raw
-        sudo rm -f /var/lib/extensions/sysext-creator.raw 2>/dev/null || true
     fi
 
-    echo "=> Odpojuji systémová rozšíření..."
+    echo "=> Unmounting system extensions..."
     sudo systemd-sysext refresh
 
     echo "--------------------------------------------------------"
-    echo "✅ Sysext-Creator byl kompletně odstraněn."
+    echo "✅ Sysext-Creator has been completely removed."
     echo "--------------------------------------------------------"
     exit 0
 fi
 
-# ==========================================
-# INSTALL LOGIKA
-# ==========================================
-echo "🚀 Aktivuji Sysext-Creator z RAW obrazu..."
+# ======================================================================
+# INSTALL LOGIC
+# ======================================================================
+echo "🚀 Activating Sysext-Creator from RAW image..."
 
 if [ ! -f "/usr/bin/sysext-creator" ]; then
-    echo "❌ Chyba: Sysext-Creator není připojen."
-    echo "Ujistěte se, že je obraz ve složce /var/lib/extensions a spusťte 'sudo systemd-sysext refresh'."
+    echo "❌ Error: Sysext-Creator is not mounted."
+    echo "Ensure the image is in /var/lib/extensions and run 'sudo systemd-sysext refresh'."
     exit 1
 fi
 
-echo "=> Načítám systemd služby a aktivuji hlídání složky (daemon)..."
+echo "=> Cleaning up deprecated legacy services (Auto-Healer)..."
+sudo systemctl stop sysext-creator-heal.service sysext-creator-heal.timer 2>/dev/null || true
+sudo systemctl disable sysext-creator-heal.service sysext-creator-heal.timer 2>/dev/null || true
+sudo rm -f /etc/systemd/system/sysext-creator-heal.service
+sudo rm -f /etc/systemd/system/sysext-creator-heal.timer
+sudo rm -f /usr/local/bin/sysext-creator-healer
+
+echo "=> Reloading systemd services and enabling staging daemon..."
 sudo systemctl daemon-reload
 sudo systemctl enable --now sysext-creator-deploy.path
 
-echo "=> Nastavuji automatické aktualizace..."
+echo "=> Setting up automatic updates (User Session)..."
 systemctl --user daemon-reload
 systemctl --user enable --now sysext-update.timer
 
-echo "=> Kontroluji Distrobox kontejner..."
+echo "=> Checking Podman container environment..."
 /usr/bin/sysext-creator list > /dev/null 2>&1 || true
 
-echo "=> Instaluji Auto-Healer (záchranný modul pro přežití upgradu OS)..."
-
-sudo tee /usr/local/bin/sysext-creator-healer > /dev/null << 'EOF'
-#!/bin/bash
-HOST_VER=$(grep VERSION_ID= /etc/os-release | cut -d'=' -f2 | tr -d '"')
-RAW_FILE="/var/lib/extensions/sysext-creator-fc${HOST_VER}.raw"
-
-if [ -f "$RAW_FILE" ]; then
-    echo "Healer: Nástroj je aktuální pro FC${HOST_VER}. Není třeba zasahovat."
-    exit 0
-fi
-
-# --- LOGIKA PRO GUI BALÍČEK (Aby Healer na Kinoite zachoval grafické rozhraní) ---
-if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] || pgrep -x plasmashell > /dev/null; then
-    PKG="sysext-creator sysext-creator-kinoite"
-else
-    PKG="sysext-creator"
-fi
-# -------------------------------------------------------------------------------
-
-# Podman spouštíme s namapovanými SELinux kontexty z hostitele pro bezpečný build na F44+
-podman run --rm --privileged \
-    -v /var/lib/extensions:/ext_out \
-    -v /etc/selinux/targeted/contexts/files/file_contexts:/tmp/file_contexts:ro \
-    "registry.fedoraproject.org/fedora:${HOST_VER}" \
-    /bin/bash -x -c "
-        mkdir -p /tmp/pkg /tmp/rootfs/usr/lib/extension-release.d && \
-        dnf install -y erofs-utils cpio --setopt=install_weak_deps=False && \
-        dnf copr enable -y nadmartin/sysext-creator && \
-        dnf download --destdir=/tmp/pkg \$PKG && \
-        echo 'ID=fedora' > /tmp/rootfs/usr/lib/extension-release.d/extension-release.sysext-creator-fc${HOST_VER} && \
-        echo 'VERSION_ID=${HOST_VER}' >> /tmp/rootfs/usr/lib/extension-release.d/extension-release.sysext-creator-fc${HOST_VER} && \
-        cd /tmp/rootfs && \
-        for f in /tmp/pkg/*.rpm; do
-            rpm2cpio \$f | cpio -idmv
-        done && \
-        mkfs.erofs -zlz4hc --force-uid=0 --force-gid=0 \
-            --file-contexts=/tmp/file_contexts \
-            /ext_out/sysext-creator-fc${HOST_VER}.raw /tmp/rootfs
-    "
-
-sysext-creator update
-systemd-sysext refresh
-EOF
-
-sudo chmod +x /usr/local/bin/sysext-creator-healer
-
-sudo tee /etc/systemd/system/sysext-creator-heal.service > /dev/null << 'EOF'
-[Unit]
-Description=Sysext-Creator Auto-Healer (Background)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/sysext-creator-healer
-EOF
-sudo tee /etc/systemd/system/sysext-creator-heal.timer > /dev/null << 'EOF'
-[Unit]
-Description=Spouští Healer 2 minuty po startu systému
-
-[Timer]
-# Počká 2 minuty po naběhnutí systému
-OnBootSec=2min
-Unit=sysext-creator-heal.service
-
-[Install]
-WantedBy=timers.target
-EOF
-sudo systemctl daemon-reload
-sudo systemctl enable --now sysext-creator-heal.timer
-
+# Setup COPR repo on host for resolving dependencies
 sudo tee /etc/yum.repos.d/_copr_nadmartin-sysext-creator.repo > /dev/null << 'EOF'
 [copr:copr.fedorainfracloud.org:nadmartin:sysext-creator]
 name=Copr repo for sysext-creator owned by nadmartin
@@ -147,24 +86,24 @@ enabled=1
 enabled_metadata=1
 exclude=*.src*
 EOF
+
 if [[ "${XDG_CURRENT_DESKTOP:-}" == *"KDE"* ]] || pgrep -x plasmashell > /dev/null; then
     if command -v kbuildsycoca6 &> /dev/null; then
-    kbuildsycoca6 &>/dev/null || true
-    echo "✅ KDE menu aktualizováno."
+        kbuildsycoca6 &>/dev/null || true
+        echo "✅ KDE menu updated."
     fi
 fi
-echo "✅ Auto-Healer je aktivní. Nástroj nyní přežije upgrady systému."
-echo "--------------------------------------------------------"
-echo "✅ Aktivace dokončena!"
-echo "📦 Nyní můžete Sysext-Creator spustit z menu aplikací."
-echo "⏳ Spouštím automatickou diagnostiku a zkoušku ohněm (E2E Test)..."
-echo "Během testu se na pozadí vytvoří a zase smažou zkušební balíčky."
 
-# Spuštění samotného testu
+echo "--------------------------------------------------------"
+echo "✅ Activation complete!"
+echo "📦 You can now launch Sysext-Creator from the application menu."
+echo "⏳ Running automatic diagnostics and E2E Test..."
+echo "Test packages will be created and deleted in the background during the test."
+
 sysext-creator-test
 
-echo -e "\nPokud testy prošly zeleně, systém je připraven k použití."
+echo -e "\nIf the tests passed (green), the system is ready to use."
 echo "--------------------------------------------------------"
 echo -e "\n================================================================================"
-echo "✅ Instalace Sysext-Creator (v2.0) byla úspěšně dokončena!"
+echo "✅ Sysext-Creator (v2.0) RAW activation successfully completed!"
 echo "================================================================================"
