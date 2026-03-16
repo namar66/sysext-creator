@@ -1,5 +1,10 @@
+[Unit]
+Description=Daily automatic update of Sysext
+
 [Timer]
-OnCalendar=daily
+OnBootSec=15min
+OnUnitActiveSec=1d
 Persistent=true
+
 [Install]
 WantedBy=timers.target
