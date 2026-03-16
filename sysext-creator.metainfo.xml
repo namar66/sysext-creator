@@ -16,7 +16,7 @@
             It allows you to seamlessly install traditional RPM packages as strictly confined, overlay-based systemd extensions.
         </p>
         <p xml:lang="cs">
-            Sysext-Creator je mocný a uživatelsky přívětivý nástroj pro atomické desktopy Fedory (Silverblue, Kinoite).
+            Sysext-Creator je uživatelsky přívětivý nástroj pro atomické desktopy Fedory (Silverblue, Kinoite).
             Umožňuje plynulou instalaci tradičních RPM balíčků ve formě bezpečně oddělených systémových rozšíření (systemd-sysext).
         </p>
     </description>
