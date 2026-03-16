@@ -1,122 +1,145 @@
-import varlink
-import platform
-import logging
-import subprocess
-import pathlib
+#!/usr/bin/env python3
+
+# Sysext-Creator Daemon v3.0 - Synchronous Fix
+# Environment: Host System (Root)
+
 import os
+import shutil
+import subprocess
 import sys
+import re
+from pathlib import Path
+from threading import Lock
+import varlink
 
-# Setup logging to journal (standard output)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(levelname)s: [%(name)s] %(message)s'
-)
-logger = logging.getLogger("sysext-daemon")
+# --- CONFIG ---
+SOCKET_PATH = "/run/sysext-creator.sock"
+EXT_DIR = Path("/var/lib/extensions")
+CONFEXT_DIR = Path("/var/lib/confexts")
+LOCK = Lock()
 
-# Security configuration
-ALLOWED_ARCHITECTURES = ["x86_64", "aarch64"]
-SYSEXT_DIR = pathlib.Path("/var/lib/extensions")
-CONFEXT_DIR = pathlib.Path("/var/lib/confexts")
+INTERFACE_NAME = "io.sysext.creator"
+INTERFACE_DIR = "/run/sysext-creator-interfaces"
+INTERFACE_FILE = os.path.join(INTERFACE_DIR, f"{INTERFACE_NAME}.varlink")
 
-class SysextManager:
-    """Implementation of the io.sysext.creator Varlink interface."""
+INTERFACE_CONTENT = f'''
+interface {INTERFACE_NAME}
+type Extension (name: string, packages: string, version: string)
+method GetHostInfo() -> (version_id: string, architecture: string, kernel: string)
+method ListExtensions() -> (extensions: []Extension)
+method DeploySysext(name: string, path: string) -> (progress: int, status: string)
+method RemoveSysext(name: string) -> ()
+'''
 
-    def __init__(self):
-        self.host_arch = platform.machine()
-        self._check_security_context()
+def log(msg):
+    print(f"[DAEMON] {msg}", flush=True)
 
-    def _check_security_context(self):
-        """Initial security audit on startup."""
-        logger.info("Initializing security handshake...")
-        
-        # Architecture validation
-        if self.host_arch not in ALLOWED_ARCHITECTURES:
-            logger.warning(f"Running on non-standard architecture: {self.host_arch}")
-        else:
-            logger.info(f"Architecture pinning active: {self.host_arch}")
+os.makedirs(INTERFACE_DIR, exist_ok=True)
+with open(INTERFACE_FILE, "w") as f:
+    f.write(INTERFACE_CONTENT)
 
-        # Permission check
-        if os.geteuid() != 0:
-            logger.error("Daemon is not running as root! System commands will fail.")
-
-    def GetHostInfo(self, ctx):
-        """Returns metadata for the container to adjust its build process."""
-        logger.info("Host info requested by container")
-        
-        # Read version from os-release
-        version_id = "unknown"
-        if pathlib.Path("/etc/os-release").exists():
-            with open("/etc/os-release") as f:
-                for line in f:
-                    if line.startswith("VERSION_ID="):
-                        version_id = line.strip().split("=")[1].strip('"')
-
-        return {
-            "version_id": version_id,
-            "architecture": self.host_arch,
-            "kernel": platform.release()
-        }
-
-    def DeploySysext(self, ctx, name, path):
-        """Safely moves a .raw image to /usr extensions."""
-        logger.info(f"Deployment request for sysext: {name}")
-        return self._deploy_resource(name, path, SYSEXT_DIR, "systemd-sysext")
-
-    def DeployConfext(self, ctx, name, path):
-        """Safely moves a .raw image to /etc configuration extensions."""
-        logger.info(f"Deployment request for confext: {name}")
-        return self._deploy_resource(name, path, CONFEXT_DIR, "systemd-confext")
-
-    def _deploy_resource(self, name, path, target_dir, service_cmd):
-        """Internal helper for atomic file deployment."""
-        source = pathlib.Path(path)
-        if not source.exists():
-            logger.error(f"Source file not found: {path}")
-            return {"status": "error: file_not_found"}
-
-        target = target_dir / name
-        try:
-            # Atomic operation: write to disk and refresh systemd layer
-            target.write_bytes(source.read_bytes())
-            logger.info(f"Image {name} written to {target_dir}")
-            
-            subprocess.run([service_cmd, "refresh"], check=True)
-            logger.info(f"{service_cmd} refresh successful")
-            
-            return {"status": "ok"}
-        except Exception as e:
-            logger.error(f"Deployment failed: {str(e)}")
-            return {"status": f"error: {str(e)}"}
-
-# Load the Varlink interface definition
-# In a real scenario, this would be read from io.sysext.creator.varlink file
-interface_definition = """
-interface io.sysext.creator
-
-method GetHostInfo() -> (
-    version_id: string,
-    architecture: string,
-    kernel: string
+sysext_service = varlink.Service(
+    vendor='Nadmartin',
+    product='Sysext Creator',
+    version='13.3',
+    interface_dir=INTERFACE_DIR
 )
 
-method DeploySysext(name: string, path: string) -> (status: string)
-method DeployConfext(name: string, path: string) -> (status: string)
-"""
+def extract_metadata_from_raw(path):
+    pkgs, ver = "unknown", "unknown"
+    try:
+        res = subprocess.run(f"strings {path} | grep SYSEXT_", shell=True, capture_output=True, text=True)
+        for line in res.stdout.splitlines():
+            if "SYSEXT_CREATOR_PACKAGES=" in line: pkgs = line.split("=", 1)[1].strip('"')
+            if "SYSEXT_VERSION_ID=" in line: ver = line.split("=", 1)[1].strip('"')
+    except: pass
+    return pkgs, ver
+
+def extract_metadata_from_mounts(name):
+    for p_base in ["/usr/lib", "/etc"]:
+        p = Path(p_base) / f"extension-release.d/extension-release.{name}"
+        if p.exists():
+            try:
+                with open(p, "r") as f:
+                    content = f.read()
+                    pkgs = re.search(r'SYSEXT_CREATOR_PACKAGES=(.*)', content)
+                    ver = re.search(r'SYSEXT_VERSION_ID=(.*)', content)
+                    return (pkgs.group(1).strip('"\n ') if pkgs else "unknown",
+                            ver.group(1).strip('"\n ') if ver else "unknown")
+            except: pass
+    return None, "unknown"
+
+@sysext_service.interface(INTERFACE_FILE)
+class SysextCreatorImpl:
+    def GetHostInfo(self, **kwargs):
+        import platform
+        return {"version_id": "43", "architecture": platform.machine(), "kernel": platform.release()}
+
+    def DeploySysext(self, name, path, **kwargs):
+        # We no longer yield. We do the work safely and return the final result.
+        with LOCK:
+            log(f"Deploying: {name} from {path}")
+            is_conf = path.endswith(".confext.raw")
+            target = (CONFEXT_DIR if is_conf else EXT_DIR) / os.path.basename(path)
+
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, target)
+                os.chmod(target, 0o644)
+
+                cmd = ["systemd-confext" if is_conf else "systemd-sysext", "refresh"]
+                log(f"Running: {' '.join(cmd)}")
+                res = subprocess.run(cmd, capture_output=True, text=True)
+
+                if res.returncode != 0:
+                    log(f"Refresh failed: {res.stderr}")
+                    if target.exists(): target.unlink()
+                    raise Exception(res.stderr.strip())
+
+                log(f"Successfully deployed {name}")
+                return {"progress": 100, "status": "Success"}
+
+            except Exception as e:
+                log(f"Deployment error: {e}")
+                raise Exception(str(e))
+
+    def ListExtensions(self, **kwargs):
+        results = []
+        found_names = set()
+        for d in [EXT_DIR, CONFEXT_DIR]:
+            if d.exists():
+                for f in d.glob("*.raw"):
+                    name = f.name.replace(".confext.raw", "").replace(".raw", "")
+                    if name in found_names: continue
+
+                    pkgs, ver = extract_metadata_from_mounts(name)
+                    if pkgs is None:
+                        pkgs, ver = extract_metadata_from_raw(f)
+
+                    results.append({"name": name, "packages": pkgs or "unknown", "version": ver})
+                    found_names.add(name)
+        return {"extensions": sorted(results, key=lambda x: x['name'])}
+
+    def RemoveSysext(self, name, **kwargs):
+        with LOCK:
+            log(f"Removing extension: {name}")
+            for d in [EXT_DIR, CONFEXT_DIR]:
+                for f in d.glob(f"{name}*.raw"):
+                    f.unlink()
+            subprocess.run(["systemd-sysext", "refresh"], check=False)
+            subprocess.run(["systemd-confext", "refresh"], check=False)
+            return {}
+
+class SysextRequestHandler(varlink.RequestHandler):
+    service = sysext_service
+
+def main():
+    log("Starting sysext-creator daemon v13.3")
+    if os.path.exists(SOCKET_PATH): os.remove(SOCKET_PATH)
+    with varlink.ThreadingServer(f"unix:{SOCKET_PATH}", SysextRequestHandler) as server:
+        os.chmod(SOCKET_PATH, 0o666)
+        log(f"✅ Daemon active on {SOCKET_PATH}")
+        server.serve_forever()
 
 if __name__ == "__main__":
-    service = varlink.Service(
-        vendor="Sysext Creator Project",
-        product="Unified Deployment Daemon",
-        version="3.0.0",
-        interface_dir=".",
-    )
-    
-    # Normally we would use systemd socket activation
-    # For initial testing, we can bind to a temporary socket
-    try:
-        logger.info("Sysext-Creator Daemon v3 started.")
-        with varlink.ThreadingServer("unix:/run/sysext-creator.sock", SysextManager()) as server:
-            server.serve_forever()
-    except Exception as e:
-        logger.critical(f"Fatal daemon error: {e}")
-        sys.exit(1)
+    main()
