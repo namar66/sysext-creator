@@ -14,8 +14,8 @@ Group=root
 
 # File System Isolation
 PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=yes
+ProtectSystem=full
+ProtectHome=read-only
 ReadWritePaths=/var/lib/extensions /var/lib/confexts /run/sysext-creator
 ReadOnlyPaths=/etc /usr
 
