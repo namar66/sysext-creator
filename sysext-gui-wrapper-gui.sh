@@ -18,7 +18,7 @@ if ! check_gui_deps; then
     echo "📦 První spuštění GUI: Stahuji a vytvářím rozšíření PyQt6..."
     echo "======================================================================"
 
-    sysext-creator install python3-pyqt6
+    sysext-cli install python3-pyqt6 python3-pyqt6
     sleep 5
 
     # Závěrečná kontrola
