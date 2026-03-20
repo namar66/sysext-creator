@@ -1,80 +1,93 @@
 #!/usr/bin/python3
 
-# Sysext-Doctor v1.2 - Integration Ready
-# Environment: Host System
-# Exit codes: 0 = Success/Clean, 1 = Error/Conflict
-
 import os
-import sys
 import subprocess
-import argparse
-import json
+import sys
 from pathlib import Path
 
-SOCKET = "unix:/run/sysext-creator.sock"
-EXT_DIR = Path("/var/lib/extensions")
+# ANSI barvičky
+GREEN = "\033[92m"
+RED = "\033[91m"
+YELLOW = "\033[93m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
 
-class Colors:
-    OK = '\033[92m'
-    WARN = '\033[93m'
-    FAIL = '\033[91m'
-    END = '\033[0m'
+CONFEXT_DIR = "/var/lib/confexts"
 
-def log_ok(msg): print(f"[{Colors.OK} OK {Colors.END}] {msg}")
-def log_warn(msg): print(f"[{Colors.WARN}WARN{Colors.END}] {msg}")
-def log_err(msg): print(f"[{Colors.FAIL}FAIL{Colors.END}] {msg}")
+def print_status(message, status):
+    status_map = {
+        "PASS": (GREEN, " OK "),
+        "FAIL": (RED, "FAIL"),
+        "WARN": (YELLOW, "WARN")
+    }
+    color, text = status_map.get(status, (RESET, "INFO"))
+    print(f"[{color}{text}{RESET}] {message}")
 
-def validate_single_file(file_path: Path):
+def get_rpm_owner(file_path):
     """
-    Performs deep validation on a single .raw file.
-    Returns True if the file is safe and valid.
+    Vrátí jméno balíčku, pokud soubor existuje a je vlastněn RPM.
+    Vrátí (None, True), pokud soubor existuje, ale není v RPM (local/merged).
+    Vrátí (None, False), pokud soubor vůbec neexistuje.
     """
-    if not file_path.exists():
-        log_err(f"File {file_path} not found.")
-        return False
+    if not os.path.exists(file_path):
+        return None, False
 
-    log_ok(f"Doctor is inspecting: {file_path.name}")
-
-    # 1. systemd-dissect validation
-    # Note: Using --no-pager and check for binary existence
-    res = subprocess.run(["systemd-dissect", "--validate", str(file_path)], capture_output=True, text=True)
-    if res.returncode != 0:
-        log_err("Systemd validation failed! Image might be corrupted or invalid.")
-        log_err(res.stderr.strip())
-        return False
-    log_ok("Systemd-dissect validation passed.")
-
-    # 2. Metadata check (Try to read extension-release)
-    res = subprocess.run(["systemd-dissect", "-j", str(file_path)], capture_output=True, text=True)
+    # -q: query, --qf: format (jen jméno), -f: file
+    res = subprocess.run(["rpm", "-q", "--qf", "%{NAME}", "-f", file_path], capture_output=True, text=True)
     if res.returncode == 0:
+        return res.stdout.strip(), True
+
+    return None, True
+
+def check_collisions():
+    print(f"\n{BOLD}--- Checking for /etc Overwrites & RPM Conflicts ---{RESET}")
+    confext_files = list(Path(CONFEXT_DIR).glob("*.raw"))
+
+    if not confext_files:
+        print("No configuration extensions found.")
+        return
+
+    etc_inventory = {}
+
+    for img in confext_files:
+        print(f"\n🔍 Analyzing {BOLD}{img.name}{RESET}...")
         try:
-            data = json.loads(res.stdout)
-            log_ok(f"Image architecture: {data.get('architecture', 'unknown')}")
-        except:
-            log_warn("Could not parse image JSON metadata.")
-    
-    # 3. Check for shadowed files in the base OS or other extensions
-    # (Optional: can be expanded to check against active /usr)
-    return True
+            res = subprocess.run(["systemd-dissect", "--list", str(img)], capture_output=True, text=True, check=True)
+
+            for line in res.stdout.splitlines():
+                if line.startswith("etc/") and not line.endswith("/"):
+                    full_path = "/" + line
+                    owner, exists = get_rpm_owner(full_path)
+
+                    if owner:
+                        # SKUTEČNÝ KONFLIKT: Soubor patří systému (RPM)
+                        print_status(f"CRITICAL: {full_path} overwrites system package {BOLD}{owner}{RESET}", "FAIL")
+                    elif exists:
+                        # VAROVÁNÍ: Soubor v systému je, ale RPM o něm neví (může to být už aktivní confext!)
+                        print_status(f"NOTICE: {full_path} is currently present on host (Active extension or local file)", "WARN")
+                    else:
+                        # ČISTÝ STAV: Soubor v systému neexistuje, extension ho vytvoří
+                        print_status(f"NEW FILE: {full_path} (clean install)", "PASS")
+
+                    # Detekce kolizí mezi obrazy navzájem
+                    if full_path in etc_inventory:
+                        etc_inventory[full_path].append(img.name)
+                        print_status(f"COLLISION: {full_path} exists in multiple images: {etc_inventory[full_path]}", "FAIL")
+                    else:
+                        etc_inventory[full_path] = [img.name]
+
+        except Exception as e:
+            print_status(f"Analysis error: {e}", "FAIL")
 
 def main():
-    parser = argparse.ArgumentParser(description="Sysext Doctor - Diagnostic Tool")
-    parser.add_argument("--file", type=str, help="Validate a specific .raw file before installation")
-    parser.add_argument("--scan", action="store_true", help="Scan all installed extensions")
-    args = parser.parse_args()
-
-    # Elevation check: systemd-dissect --validate often needs root for loop devices
     if os.geteuid() != 0:
-        log_err("Sysext Doctor requires root privileges. Please run with pkexec or sudo.")
+        print(f"{RED}Error: Spusť mě pod sudo.{RESET}")
         sys.exit(1)
 
-    if args.file:
-        success = validate_single_file(Path(args.file))
-        sys.exit(0 if success else 1)
-    
-    # If no specific file, perform a general scan (like v1.1)
-    # ... (rest of the scan logic from previous version) ...
-    sys.exit(0)
+    print(f"{BOLD}Sysext Doctor v1.6 - Precision Diagnostic{RESET}")
+    print(f"{YELLOW}Note: If extensions are already merged, their files will appear as 'NOTICE'.{RESET}")
+    check_collisions()
+    print(f"\n{BOLD}--- Diagnostic Complete ---{RESET}")
 
 if __name__ == "__main__":
     main()
