@@ -11,9 +11,9 @@ from pathlib import Path
 
 TEST_PKG_NAME = "test-distrobox"
 TEST_PKGS = "distrobox"
-SOCKET_PATH = "unix:/run/sysext-creator.sock"
-BUILDER_SCRIPT = Path.home() / ".local/bin/sysext-builder"
-CONTAINER_NAME = "sysext-creator-builder-fc43"
+SOCKET_PATH = "unix:/run/sysext-creator/sysext-creator.sock"
+BUILDER_SCRIPT = "/usr/local/bin/sysext-creator-builder.py"
+CONTAINER_NAME = "sysext-builder"
 
 def print_step(msg): print(f"\n\033[1;34m>>> {msg}\033[0m")
 def print_success(msg): print(f"\033[1;32m[OK]\033[0m {msg}")
