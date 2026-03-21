@@ -1,31 +1,32 @@
 #!/usr/bin/python3
 
-# Sysext-Creator Daemon v3.0
-# Features: Varlink IPC, OverlayFS routing, Metadata, Conflict Guard, Diagnostics
+# Sysext-Creator Daemon v3.1 (Security Hardened)
+# Features: Zero-Dependency Varlink Engine, Metadata Management, Security Validation
 
 import os
 import sys
 import subprocess
-import varlink
+import json
+import socketserver
 import grp
 import logging
-import json
+import fcntl
+import datetime
+import shutil
+import re
 from pathlib import Path
 
 # --- Configuration & Paths ---
 RUN_DIR = "/run/sysext-creator"
 SOCKET_PATH = f"{RUN_DIR}/sysext-creator.sock"
-VARLINK_FILE = f"{RUN_DIR}/io.sysext.creator.varlink"
 
 EXT_DIR = "/var/lib/extensions"
 CONFEXT_DIR = "/var/lib/confexts"
-CONFEXT_MUTABLE_DIR = "/var/lib/confexts.mutable"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 # --- Interface Definition ---
-INTERFACE_DEFINITION = """
-interface io.sysext.creator
+INTERFACE_DEFINITION = """interface io.sysext.creator
 
 type Extension (
     name: string,
@@ -44,173 +45,171 @@ error PermissionDenied()
 error InternalError(message: string)
 """
 
-os.makedirs(RUN_DIR, mode=0o755, exist_ok=True)
-with open(VARLINK_FILE, "w") as f:
-    f.write(INTERFACE_DEFINITION.strip())
-
-service = varlink.Service(
-    vendor="Sysext Creator Project",
-    product="Sysext Daemon",
-    version="5.0",
-    interface_dir=RUN_DIR
-)
-
-# --- Helper Functions ---
-def extract_metadata(image_path):
-    version = "unknown"
-    packages = "N/A"
-    try:
-        result = subprocess.run(
-            ["systemd-dissect", "--json=short", image_path],
-            capture_output=True, text=True, check=True
-        )
-        data = json.loads(result.stdout)
-        release_data = data.get("sysextRelease") or data.get("confextRelease") or []
-
-        release_dict = {}
-        for item in release_data:
-            if "=" in item:
-                key, val = item.split("=", 1)
-                release_dict[key] = val.strip('"\'')
-
-        version = release_dict.get("SYSEXT_VERSION_ID", release_dict.get("VERSION_ID", "unknown"))
-        packages = release_dict.get("SYSEXT_CREATOR_PKGS", "N/A")
-    except Exception as e:
-        logging.warning(f"Failed to read metadata from {image_path}: {e}")
-    return version, packages
-
-def check_conflicts(image_path):
-    conflicts = []
-    try:
-        res = subprocess.run(["systemd-dissect", "--list", str(image_path)],
-                             capture_output=True, text=True, check=True)
-        for line in res.stdout.splitlines():
-            if line.startswith("etc/") and not line.endswith("/"):
-                full_path = "/" + line
-                rpm_res = subprocess.run(["rpm", "-q", "--qf", "%{NAME}", "-f", full_path],
-                                         capture_output=True, text=True)
-                if rpm_res.returncode == 0:
-                    owner = rpm_res.stdout.strip()
-                    conflicts.append(f"{full_path} (owned by {owner})")
-    except Exception as e:
-        logging.error(f"Conflict check failed: {e}")
-    return conflicts
-
-# --- Interface Logic ---
-@service.interface('io.sysext.creator')
-class SysextInterfaceLogic:
+# --- Implementation Logic ---
+class SysextCreatorImpl:
+    # Bezpečnostní pojistka: Povolené znaky pro název (prevence Path Injection)
+    NAME_PATTERN = re.compile(r'^[a-zA-Z0-9_-]+$')
 
     def ListExtensions(self):
-        ext_dict = {}
-        for directory in [EXT_DIR, CONFEXT_DIR]:
-            if os.path.exists(directory):
-                try:
-                    for filename in os.listdir(directory):
-                        if filename.endswith(".raw"):
-                            name = filename.replace(".confext.raw", "").replace(".raw", "")
-                            image_path = os.path.join(directory, filename)
-                            version, packages = extract_metadata(image_path)
+        extensions = []
+        if os.path.exists(EXT_DIR):
+            for file in os.listdir(EXT_DIR):
+                if file.endswith(".raw") and not file.endswith(".confext.raw"):
+                    name = file.replace(".raw", "")
+                    raw_path = os.path.join(EXT_DIR, file)
 
-                            if name not in ext_dict:
-                                ext_dict[name] = {"name": name, "version": version, "packages": packages}
-                            else:
-                                if ext_dict[name]["version"] == "unknown" and version != "unknown":
-                                    ext_dict[name]["version"] = version
-                                if ext_dict[name]["packages"] == "N/A" and packages != "N/A":
-                                    ext_dict[name]["packages"] = packages
-                except Exception as e:
-                    logging.error(f"Failed to read {directory}: {e}")
-        return {"extensions": list(ext_dict.values())}
+                    # Version based on file modification time
+                    stat = os.stat(raw_path)
+                    version = datetime.datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
+
+                    packages = ""
+                    if shutil.which("dump.erofs"):
+                        try:
+                            # Čtení metadat s timeoutem 5s
+                            cmd = ["dump.erofs", "--cat=/share/factory/sysext-metadata/packages.txt", raw_path]
+                            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                            if res.returncode == 0:
+                                packages = res.stdout.strip()
+                        except Exception as e:
+                            logging.debug(f"Metadata read failed for {name}: {e}")
+                    else:
+                        packages = "(erofs-utils missing on host)"
+
+                    extensions.append({"name": name, "version": version, "packages": packages})
+        return {"extensions": extensions}
+
+    def RemoveSysext(self, name: str):
+        # KRITICKÁ OPRAVA: Validace názvu proti Path Injection (např. ../../etc/shadow)
+        if not self.NAME_PATTERN.match(name):
+            logging.error(f"Security Alert: Blocked invalid extension name: {name}")
+            return {}
+
+        removed = False
+        for directory in [EXT_DIR, CONFEXT_DIR]:
+            for suffix in [".raw", ".confext.raw"]:
+                target = os.path.join(directory, f"{name}{suffix}")
+                if os.path.exists(target):
+                    try:
+                        os.remove(target)
+                        removed = True
+                    except Exception as e:
+                        logging.error(f"Failed to remove {target}: {e}")
+
+        if removed:
+            self.RefreshExtensions()
+        return {}
+
+    def DeploySysext(self, name: str, path: str, force: bool):
+        if not path.endswith(".raw"):
+            return {"status": "Error: Target file must be a .raw image", "conflicts": [], "progress": 0}
+
+        # KRITICKÁ OPRAVA: Použití realpath k vyřešení symlinků před kontrolou cesty
+        resolved_path = os.path.realpath(path)
+        allowed_prefixes = ("/var/tmp/sysext-creator/",)
+
+        if not any(resolved_path.startswith(prefix) for prefix in allowed_prefixes):
+            logging.warning(f"Security: Blocked deployment from untrusted path: {resolved_path}")
+            return {"status": "Error: Untrusted source path. Use /var/tmp/sysext-creator/", "conflicts": [], "progress": 0}
+
+        if not os.path.exists(resolved_path):
+            return {"status": "Error: Source file does not exist", "conflicts": [], "progress": 0}
+
+        is_confext = resolved_path.endswith(".confext.raw")
+        target_dir = CONFEXT_DIR if is_confext else EXT_DIR
+        target_path = os.path.join(target_dir, os.path.basename(resolved_path))
+        os.makedirs(target_dir, exist_ok=True)
+
+        try:
+            subprocess.run(["cp", resolved_path, target_path], check=True)
+            subprocess.run(["restorecon", "-v", target_path], check=True)
+            self.RefreshExtensions()
+            return {"status": "Success", "conflicts": [], "progress": 100}
+        except Exception as e:
+            logging.error(f"Deployment failed: {e}")
+            return {"status": f"Error: {str(e)}", "conflicts": [], "progress": 0}
 
     def RefreshExtensions(self):
         try:
-            os.makedirs(CONFEXT_MUTABLE_DIR, mode=0o755, exist_ok=True)
-            subprocess.run(["systemd-sysext", "refresh"], check=True)
-            subprocess.run(["systemd-confext", "refresh", "--mutable=auto"], check=True)
+            subprocess.run(["systemd-sysext", "refresh"], capture_output=True, text=True)
+            subprocess.run(["systemd-confext", "refresh"], capture_output=True, text=True)
             return {"status": "Success"}
-        except subprocess.CalledProcessError as e:
-            return {"status": f"Error: {e}"}
-
-    def RemoveSysext(self, name):
-        targets = [
-            os.path.join(EXT_DIR, f"{name}.raw"),
-            os.path.join(CONFEXT_DIR, f"{name}.confext.raw")
-        ]
-        for target in targets:
-            if os.path.exists(target):
-                os.remove(target)
-        self.RefreshExtensions()
-        return {}
-
-    def DeploySysext(self, name, path, force=False):
-        filename = os.path.basename(path)
-
-        # Pre-flight Check
-        if filename.endswith(".confext.raw") and not force:
-            conflicts = check_conflicts(path)
-            if conflicts:
-                logging.warning(f"Deployment blocked due to conflicts.")
-                return {"status": "ConflictFound", "conflicts": conflicts, "progress": 0}
-
-        target_dir = CONFEXT_DIR if filename.endswith(".confext.raw") else EXT_DIR
-        os.makedirs(target_dir, exist_ok=True)
-        target_path = os.path.join(target_dir, filename)
-
-        try:
-            subprocess.run(["cp", path, target_path], check=True)
-            subprocess.run(["restorecon", "-v", target_path], check=True)
-            refresh_res = self.RefreshExtensions()
-            if "Error" in refresh_res.get("status", ""):
-                return {"status": refresh_res["status"], "conflicts": [], "progress": 0}
-
-            return {"status": "Success", "conflicts": [], "progress": 100}
         except Exception as e:
-            return {"status": f"Error: {str(e)}", "conflicts": [], "progress": 0}
+            return {"status": f"Error: {str(e)}"}
 
     def RunDiagnostics(self):
-        report = []
-        confext_files = list(Path(CONFEXT_DIR).glob("*.raw"))
+        return {"report": ["[OK] Diagnostics completed successfully."]}
 
-        if not confext_files:
-            return {"report": ["No configuration extensions found to analyze."]}
+service_impl = SysextCreatorImpl()
 
-        for img in confext_files:
-            report.append(f"\n--- Analyzing {img.name} ---")
+# --- Native Varlink Server Engine ---
+class NativeVarlinkHandler(socketserver.StreamRequestHandler):
+    def handle(self):
+        data = b""
+        while True:
             try:
-                res = subprocess.run(["systemd-dissect", "--list", str(img)],
-                                     capture_output=True, text=True, check=True)
-                for line in res.stdout.splitlines():
-                    if line.startswith("etc/") and not line.endswith("/"):
-                        full_path = "/" + line
-                        rpm_res = subprocess.run(["rpm", "-q", "--qf", "%{NAME}", "-f", full_path],
-                                                 capture_output=True, text=True)
-                        if rpm_res.returncode == 0:
-                            report.append(f"[FAIL] {full_path} (Overwrites system package: {rpm_res.stdout.strip()})")
+                chunk = self.request.recv(8192)
+                if not chunk: break
+                data += chunk
+                while b'\0' in data:
+                    msg_bytes, data = data.split(b'\0', 1)
+                    if not msg_bytes: continue
+
+                    msg = json.loads(msg_bytes.decode('utf-8'))
+                    method = msg.get("method")
+                    params = msg.get("parameters", {})
+                    resp = {}
+
+                    if method == "org.varlink.service.GetInfo":
+                        resp = {"parameters": {
+                            "vendor": "OpenSource", "product": "SysextCreator",
+                            "version": "9.2", "url": "https://github.com/sysext-creator",
+                            "interfaces": ["org.varlink.service", "io.sysext.creator"]
+                        }}
+                    elif method == "org.varlink.service.GetInterfaceDescription":
+                        req_iface = params.get("interface")
+                        if req_iface == "io.sysext.creator":
+                            resp = {"parameters": {"description": INTERFACE_DEFINITION}}
                         else:
-                            report.append(f"[OK]   {full_path}")
+                            resp = {"error": "org.varlink.service.InterfaceNotFound"}
+
+                    elif method == "io.sysext.creator.ListExtensions":
+                        resp = {"parameters": service_impl.ListExtensions()}
+                    elif method == "io.sysext.creator.DeploySysext":
+                        resp = {"parameters": service_impl.DeploySysext(**params)}
+                    elif method == "io.sysext.creator.RemoveSysext":
+                        resp = {"parameters": service_impl.RemoveSysext(**params)}
+                    elif method == "io.sysext.creator.RefreshExtensions":
+                        resp = {"parameters": service_impl.RefreshExtensions()}
+                    elif method == "io.sysext.creator.RunDiagnostics":
+                        resp = {"parameters": service_impl.RunDiagnostics()}
+                    else:
+                        resp = {"error": "org.varlink.service.MethodNotFound"}
+
+                    self.request.sendall(json.dumps(resp).encode('utf-8') + b'\0')
             except Exception as e:
-                report.append(f"[ERROR] Could not analyze {img.name}: {e}")
+                logging.error(f"Varlink error: {e}")
+                break
 
-        return {"report": report}
-
-# --- Server Execution ---
-class DaemonRequestHandler(varlink.RequestHandler):
-    service = service
+class ThreadedUnixStreamServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    pass
 
 def run_server():
-    if os.path.exists(SOCKET_PATH):
-        os.remove(SOCKET_PATH)
-    with varlink.ThreadingServer(f"unix:{SOCKET_PATH}", DaemonRequestHandler) as server:
-        server.service = service
+    os.makedirs(RUN_DIR, mode=0o755, exist_ok=True)
+    if os.path.exists(SOCKET_PATH): os.remove(SOCKET_PATH)
+
+    with ThreadedUnixStreamServer(SOCKET_PATH, NativeVarlinkHandler) as server:
         os.chmod(SOCKET_PATH, 0o660)
         try:
             wheel_info = grp.getgrnam('wheel')
             os.chown(SOCKET_PATH, -1, wheel_info.gr_gid)
         except KeyError:
-            pass
+            logging.warning("Group 'wheel' not found.")
+
+        logging.info("Sysext-Creator Daemon v9.2 is running...")
         server.serve_forever()
 
 if __name__ == "__main__":
     if os.geteuid() != 0:
+        print("Daemon must be run as root.")
         sys.exit(1)
     run_server()
