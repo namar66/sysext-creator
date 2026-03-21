@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Sysext-Creator GUI v4.1 - Thread Safe & Auto-Updater
+# Sysext-Creator GUI v3.0 - Thread Safe & Auto-Updater
 # Tabs: Manager, Creator, Doctor, Search, Updater
 
 import sys
@@ -15,7 +15,7 @@ from PyQt6.QtCore import QThread, pyqtSignal, QProcess
 SOCKET_PATH = "unix:/run/sysext-creator/sysext-creator.sock"
 INTERFACE = "io.sysext.creator"
 CONTAINER_NAME = "sysext-builder"
-BUILDER_SCRIPT = os.path.expanduser("/run/host/usr/bin/sysext-creator-builder.py")
+BUILDER_SCRIPT = os.path.expanduser("/run/host/usr/local/bin/sysext-creator-builder.py")
 
 class DeployWorker(QThread):
     finished = pyqtSignal(dict)
