@@ -1,90 +1,61 @@
-# 📦 Sysext-Creator (v2.0) still under development
+# Sysext Creator (v3.0)
 
-**Advanced system extension manager for atomic Fedora systems (Kinoite & Silverblue).**
+![License](https://img.shields.io/badge/license-GPLv2-blue.svg)
+![Platform](https://img.shields.io/badge/platform-Fedora_Atomic-3870b2.svg)
 
-Sysext-Creator is a tool that allows you to install classic RPM packages and graphical applications using `systemd-sysext` technology. Instead of slow package layering via `rpm-ostree` which requires reboots, Sysext-Creator smartly wraps applications into fully isolated `.raw` images using **Podman**. 
+A robust, atomic-first system extension manager for immutable Linux distributions (Fedora Silverblue, Kinoite, CoreOS). 
 
-Your base system remains 100% clean, untouched, and lightning fast.
-
----
+Sysext Creator allows you to cleanly overlay RPM packages (and their precise dependencies) onto your read-only root filesystem using `systemd-sysext` and `systemd-confext`.
 
 ## ✨ Key Features
 
-* 🐳 **Pure Podman Architecture:** Everything runs securely in an isolated container in the background. No Distrobox required, and no polluting the host system.
-* 🪄 **Auto-Healer:** Atomic systems suffer from old extensions breaking after a major OS upgrade (e.g., from Fedora 40 to 41). Sysext-Creator solves this! After a major update, it wakes up in the background, detects the new OS version specifically for the new host system.
-* 🖥️ **Full-featured GUI (Kinoite):** A beautiful, native, and secure Qt6 graphical interface (no need to enter a password via `pkexec`).
-* 🧩 **Local RPM Installation:** Downloaded an `.rpm` package from the internet? The tool smartly translates the path and installs it along with all necessary dependencies.
+* **Host-Aware Dependency Resolution:** Uses `rpm-ostree install --dry-run` to calculate the exact delta of missing packages. It never downloads bloated dependencies your host OS already has.
+* **Isolated Build Environment:** Downloads and extracts RPMs safely inside a Toolbox container (`dnf`, `rpm2cpio`), leaving your host OS completely untouched during the build phase.
+* **Rootless Operation via IPC:** The backend daemon runs as root, but your user tools (GUI/CLI) communicate with it securely via a **Varlink UNIX socket**. No annoying Polkit password prompts required for daily usage.
+* **Smart `noexec` Workaround:** Automatically detects executable scripts in `/etc` (like SDDM setups), relocates them to `/usr/libexec`, and generates `tmpfiles.d` symlinks to bypass `systemd-confext` execution restrictions.
+* **SELinux & Permissions Guard:** Enforces `root:root` ownership and injects correct host SELinux contexts during the `mkfs.erofs` image creation to prevent boot hangs.
+* **PyQt6 GUI & CLI:** Comes with a full-featured graphical interface and a scriptable command-line tool.
+* **Auto-Updater:** A systemd-timer-driven background service that keeps your layered packages up to date.
 
----
+## 🏗️ Architecture
+
+1.  **Daemon (`sysext-creator-daemon.py`):** The privileged backend. It strictly handles mounting, deploying `.raw` files to `/var/lib/extensions`, and refreshing `systemd-sysext`. Hardened via systemd directives.
+2.  **Builder (`sysext-creator-builder.py`):** The isolated engine running inside a Toolbox container.
+3.  **Clients (`sysext-creator-gui.py`, `sysext-cli.py`):** Unprivileged frontends for user interaction.
 
 ## 🚀 Installation
-## Setup systemd-sysext
-1. create extensions dir
-```Bash
-sudo install -d -m 0755 -o 0 -g 0 "/var/lib/extensions"
-sudo restorecon -RFv "/var/lib/extensions"
-```
-2. activate systemd-sysext.service
-```Bash
-sudo systemctl enable systemd-sysext.service
-```
-## 🚀 Quick Installation (Standalone RAW)
-Sysext-Creator is distributed as a system extension itself!
 
-1. Download the latest `sysext-creator.raw` from the Releases page.
-2. Move it to the extensions directory:
-*(note be sure you have enabled systemd-sysext and properly created /var/lib/extensions)
-```bash
-   sudo cp sysext-creator.raw /var/lib/extensions/
-   sudo systemctl restart systemd-sysext.service
- ```
-3.Run the bootstrap setup (available directly from the image):
-
+1. Clone this repository to a temporary directory:
+   ```bash
+   git clone [https://github.com/YOUR_USERNAME/sysext-creator.git](https://github.com/YOUR_USERNAME/sysext-creator.git)
+   cd sysext-creator
+   ```
+2. Run the automated bootstrap installer:
 ```Bash
-sysext-creator-setup
-sysext-creator update
+chmod +x install.sh
+./install.sh
 ```
-## 🚀 Quick Installation (Standalone in $Home)
+Note: The installer will automatically spin up a Toolbox container, build an initial system extension containing required Python dependencies (python3-varlink, python3-pyqt6), and set up the systemd daemon.
+💻 Usage
+Graphical Interface
+Simply launch Sysext Creator from your desktop application menu.
+# Install a new package (e.g., htop)
+Note: sysext-cli install <image_name>  <package_name>  <package_>
 ```Bash
-git clone https://github.com/namar66/sysext-creator.git
-cd sysext-creator
-chmod +x *.sh
-./sysext-creator-setup.sh
+sysext-cli install htop htop
 ```
-💻 CLI Usage
-
-# Search for packages
+# List active extensions
 ```Bash
-sysext-creator search <keyword>
-```
-# Install a package
-```Bash
-sysext-creator install <package_name>
-```
-* local downloaded rpm package
-```Bash
-sysext-creator install <_path_package_rpm>
-```
-# Update all extensions
-```Bash
-sysext-creator update
+sysext-cli list
 ```
 # Remove an extension
 ```Bash
-sysext-creator rm <package_name>
+sysext-cli remove htop
 ```
-# check installed sysext images
+🛠️ Diagnostics
+If you suspect an extension is conflicting with base system RPMs, use the built-in diagnostic tool (requires sudo):
 ```Bash
-sysext-creator doctor
+sudo python3 /opt/sysext-creator/sysext-doctor.py
 ```
-🧹 Uninstallation
-# Uninstall (Standalone RAW)
-```Bash
-sysext-creator-setup uninstall
-```
-# Uninstall (Standalone in $Home)
-```Bash
-./sysext-creator-setup.sh uninstall
-```
-* 🤝 License
-* GPLv2
+📄 License
+This project is licensed under the GPLv2 License - see the LICENSE file for details.
