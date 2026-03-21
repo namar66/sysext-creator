@@ -1,9 +1,8 @@
 #!/usr/bin/python3
 
-# Sysext-Creator Auto-Updater v3.0
-# Periodically rebuilds extensions to fetch the latest RPM packages.
+# Sysext-Creator Auto-Updater v1.2
+# Periodically rebuilds extensions via safe Drop-Zone.
 
-import os
 import sys
 import subprocess
 import varlink
@@ -16,70 +15,52 @@ SOCKET_PATH = "unix:/run/sysext-creator/sysext-creator.sock"
 INTERFACE = "io.sysext.creator"
 CONTAINER_NAME = "sysext-builder"
 BUILDER_SCRIPT = "/usr/local/bin/sysext-creator-builder.py"
-BUILD_DIR = Path.home() / "sysext-builds"
+BUILD_DIR = Path("/var/tmp/sysext-creator")
 
 def update_extensions():
     try:
         client = varlink.Client(address=SOCKET_PATH)
         remote = client.open(INTERFACE)
     except Exception as e:
-        logging.error(f"Failed to connect to daemon via Varlink: {e}")
+        logging.error(f"Failed to connect to daemon: {e}")
         sys.exit(1)
 
     try:
         res = remote.ListExtensions()
         extensions = res.get("extensions", [])
     except Exception as e:
-        logging.error(f"Failed to fetch extensions from daemon: {e}")
+        logging.error(f"Failed to fetch extensions: {e}")
         sys.exit(1)
 
     if not extensions:
-        logging.info("No extensions found. Nothing to update.")
+        logging.info("No extensions found to update.")
         return
 
-    # Translate host path to toolbox path if needed
-    toolbox_script_path = BUILDER_SCRIPT
-    if toolbox_script_path.startswith("/usr/"):
-        toolbox_script_path = "/run/host" + toolbox_script_path
+    # Cesta uvnitř Toolboxu k hostitelskému skriptu
+    toolbox_script_path = "/run/host" + BUILDER_SCRIPT
 
     for ext in extensions:
         name = ext.get("name")
-        packages = ext.get("packages")
+        packages = ext.get("packages", "")
 
-        # Skip extensions built before we added the packages metadata feature
-        if not packages or packages == "N/A":
-            logging.warning(f"Skipping '{name}': No package metadata available.")
+        if not packages or packages == "N/A" or "missing" in packages:
+            logging.warning(f"Skipping '{name}': No metadata.")
             continue
 
-        logging.info(f"Starting update for '{name}' (Packages: {packages})")
+        logging.info(f"Updating '{name}'...")
 
-        # Step 1: Rebuild inside Toolbox
-        build_cmd = ["toolbox", "run", "-c", CONTAINER_NAME, "python3", toolbox_script_path, name] + packages.split()
+        build_args = ["run", "-c", CONTAINER_NAME, "python3", toolbox_script_path, name] + packages.split()
         try:
-            subprocess.run(build_cmd, check=True)
-        except subprocess.CalledProcessError:
-            logging.error(f"Build failed for '{name}'. Moving to next extension.")
-            continue
+            subprocess.run(["toolbox"] + build_args, check=True)
 
-        # Step 2: Deploy new images via Daemon
-        sysext_path = BUILD_DIR / f"{name}.raw"
-        confext_path = BUILD_DIR / f"{name}.confext.raw"
-
-        deployed = False
-        for path in [sysext_path, confext_path]:
-            if path.exists():
-                logging.info(f"Deploying updated image: {path.name}")
-                try:
-                    # Using force=True to ensure unattended updates do not block on warnings
+            # Nasazení po úspěšném buildu
+            for suffix in ["", ".confext"]:
+                path = BUILD_DIR / f"{name}{suffix}.raw"
+                if path.exists():
                     remote.DeploySysext(name, str(path), True)
-                    deployed = True
-                except varlink.error.VarlinkError as e:
-                    logging.error(f"Daemon error deploying {path.name}: {e}")
-
-        if deployed:
             logging.info(f"Successfully updated '{name}'.")
-
-    logging.info("Auto-Updater finished successfully.")
+        except Exception as e:
+            logging.error(f"Update failed for '{name}': {e}")
 
 if __name__ == "__main__":
     update_extensions()
