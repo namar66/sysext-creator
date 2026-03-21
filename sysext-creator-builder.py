@@ -53,7 +53,7 @@ def calculate_host_dependencies(packages):
         added_pkgs = []
         parsing_added = False
         # Robustní regex pro NEVRA (včetně volitelné Epochy a architektonické tečky)
-        nevra_re = re.compile(r'^(.+?)-(([0-9]+:)?([^-]+)-([^-]+))\.(x86_64|noarch)$')
+        nevra_re = re.compile(r'^(.+?)-(([0-9]+:)?([^-]+)-([^-]+))\.(x86_64|noarch|i686)$')
 
         for line in output.splitlines():
             if "Exiting because" in line: break
@@ -70,7 +70,7 @@ def calculate_host_dependencies(packages):
                 if match:
                     name = match.group(1)
                     arch = match.group(6)
-                    if arch in ["x86_64", "noarch"] and not ("debuginfo" in name or "debugsource" in name):
+                    if arch in ["x86_64", "noarch", "i686"] and not ("debuginfo" in name or "debugsource" in name):
                         formatted = f"{name}.{arch}"
                         if formatted not in added_pkgs: added_pkgs.append(formatted)
                 else:
