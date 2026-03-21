@@ -2,6 +2,7 @@
 
 ![License](https://img.shields.io/badge/license-GPLv2-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Fedora_Atomic-3870b2.svg)
+![Experience](https://img.shields.io/badge/user-Linux__admin-black?logo=linux)
 
 A robust, atomic-first system extension manager for immutable Linux distributions (Fedora Silverblue, Kinoite, CoreOS). 
 
