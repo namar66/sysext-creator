@@ -10,4 +10,4 @@ Icon=package-x-generic
 Name=Install as System Extension
 Name[cs]=Instalovat jako System Extension
 Icon=system-software-install
-Exec=konsole -e bash -c "sysext-creator install '%f'; echo -e '\n✨ Done! The window will close in 3 seconds...'; sleep 3"
+Exec=konsole -e bash -c "sysext-cli install '%f'; echo -e '\n✨ Done! The window will close in 3 seconds...'; sleep 3"
