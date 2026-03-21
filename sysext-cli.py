@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Sysext-Creator CLI v3.0
+# Sysext-Creator CLI v2.1
 # Features: Smart Install, Builder Integration, Varlink IPC, Conflict Resolution
 
 import sys
