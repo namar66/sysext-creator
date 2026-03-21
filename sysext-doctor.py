@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-# ANSI barvičky
+# ANSI colors
 GREEN = "\033[92m"
 RED = "\033[91m"
 YELLOW = "\033[93m"
@@ -81,7 +81,7 @@ def check_collisions():
 
 def main():
     if os.geteuid() != 0:
-        print(f"{RED}Error: Spusť mě pod sudo.{RESET}")
+        print(f"{RED}Error: Please run this script with sudo.{RESET}")
         sys.exit(1)
 
     print(f"{BOLD}Sysext Doctor v1.6 - Precision Diagnostic{RESET}")
