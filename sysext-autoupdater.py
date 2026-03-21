@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Sysext-Creator Auto-Updater v1.0
+# Sysext-Creator Auto-Updater v3.0
 # Periodically rebuilds extensions to fetch the latest RPM packages.
 
 import os
@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 SOCKET_PATH = "unix:/run/sysext-creator/sysext-creator.sock"
 INTERFACE = "io.sysext.creator"
 CONTAINER_NAME = "sysext-builder"
-BUILDER_SCRIPT = "/usr/bin/sysext-creator-builder.py"
+BUILDER_SCRIPT = "/usr/local/bin/sysext-creator-builder.py"
 BUILD_DIR = Path.home() / "sysext-builds"
 
 def update_extensions():
