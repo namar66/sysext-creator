@@ -61,5 +61,21 @@ If you suspect an extension is conflicting with base system RPMs, use the built-
 ```Bash
 sudo python3 /opt/sysext-creator/sysext-doctor.py
 ```
+## 🚑 Emergency Rescue (System Won't Boot)
+
+Because `sysext-creator` modifies the root filesystem overlay, a highly conflicting package might occasionally prevent your system from booting properly (e.g., a broken display manager configuration). 
+
+**You do not need to reinstall your OS or use a live USB!** Fedora Atomic and systemd provide a built-in safety net to temporarily disable all extensions.
+
+If your system hangs during boot:
+1. Hard reboot your computer.
+2. When the **GRUB boot menu** appears, press `e` to edit the current boot entry.
+3. Find the line that starts with `linux` (or `linuxefi`).
+4. Move your cursor to the very end of that line, add a space, and type exactly this:
+   `systemd.sysext=0 systemd.confext=0`
+5. Press `Ctrl+X` (or `F10`) to boot.
+
+Your system will boot in its pure, factory-default state, completely ignoring all custom `.raw` extensions. Once logged in, simply open a terminal, remove the problematic extension using `sysext-cli remove <name>`, and reboot normally.
+
 📄 License
 This project is licensed under the GPLv2 License - see the LICENSE file for details.
