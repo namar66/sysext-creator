@@ -6,7 +6,11 @@
 A robust, atomic-first system extension manager for immutable Linux distributions (Fedora Silverblue, Kinoite, CoreOS). 
 
 Sysext Creator allows you to cleanly overlay RPM packages (and their precise dependencies) onto your read-only root filesystem using `systemd-sysext` and `systemd-confext`.
+## ⚠️ Prerequisites
 
+* **Fedora Atomic Desktop** (Silverblue, Kinoite, Sericea, Onyx, or CoreOS).
+* **Toolbox** and **Podman** must be installed (included by default in Fedora).
+* **Wheel Group Membership:** Your user account *must* be a member of the `wheel` group (this is the default for the main user created during Fedora installation). This is required to securely communicate with the background daemon via UNIX sockets without entering a password.
 ## ✨ Key Features
 
 * **Host-Aware Dependency Resolution:** Uses `rpm-ostree install --dry-run` to calculate the exact delta of missing packages. It never downloads bloated dependencies your host OS already has.
