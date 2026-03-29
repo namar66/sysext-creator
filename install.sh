@@ -1,153 +1,106 @@
 #!/bin/bash
 
-# Sysext-Creator Ultimate Installer v2.1
-# Features: Sticky-Bit Drop-Zone, Hardened Systemd Service
+# Sysext Creator Pro - Ultimate Local Installer
+# Installs CLI, Builder, Doctor, Bash Completion, and optionally GUI
 
-set -e
+export LANG=C
+export LC_ALL=C
 
-# Cesty
-OPT_DIR="/opt/sysext-creator"
-BIN_DIR="/usr/local/bin"
-USER_BIN_DIR="$HOME/.local/bin"
-SYSTEMD_SYS_DIR="/etc/systemd/system"
-SYSTEMD_USR_DIR="$HOME/.config/systemd/user"
-EXT_DIR="/var/lib/extensions"
-BUILD_OUTPUT="/var/tmp/sysext-creator/sysext-creator.raw"
-ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
-APP_DIR="$HOME/.local/share/applications"
-COMPLETION_DIR="$HOME/.local/share/bash-completion/completions/"
-USER_KIO_DIR="$HOME/.local/share/kio/servicemenus/"
+# ==========================================
+# CONFIGURATION
+# ==========================================
+APP_NAME="Sysext Creator Pro"
+BIN_PATH="$HOME/.local/bin"
+COMPLETION_PATH="$HOME/.local/share/bash-completion/completions"
+ICON_PATH="$HOME/.local/share/icons/hicolor/256x256/apps"
+DESKTOP_PATH="$HOME/.local/share/applications"
 
-case "$1" in
-    uninstall|remove|--uninstall)
-        echo "=== Uninstalling Sysext-Creator ==="
-        sudo systemctl disable --now sysext-creator-daemon.service 2>/dev/null || true
-        systemctl --user disable --now sysext-autoupdater.timer 2>/dev/null || true
+# Source files
+CLI_SCRIPT="sysext-cli.py"
+GUI_SCRIPT="sysext-gui-pro.py"
+BUILDER_SCRIPT="sysext-creator-builder.py"
+DOCTOR_SCRIPT="sysext-doctor.py"
+BASH_COMP="sysext-creator-cli.bash"
+ICON_SOURCE="sysext-creator-icon.png"
 
-        sudo rm -rf "$OPT_DIR"
-        sudo rm -f "$BIN_DIR/sysext-creator-builder.py" "$BIN_DIR/sysext-cli"
-        rm -f "$USER_BIN_DIR/sysext-creator-gui" "$USER_BIN_DIR/sysext-autoupdater.py"
-        rm -f "$APP_DIR/sysext-creator.desktop" "$ICON_DIR/sysext-creator.png"
+function log() {
+    echo -e "\033[1;34m[$APP_NAME Install]\033[0m $1"
+}
 
-        sudo rm -f "$SYSTEMD_SYS_DIR/sysext-creator-daemon.service"
-        rm -f "$SYSTEMD_USR_DIR/sysext-autoupdater.service" "$SYSTEMD_USR_DIR/sysext-autoupdater.timer"
+log "Initializing local user installation..."
 
-        sudo systemctl daemon-reload
-        systemctl --user daemon-reload
-        echo "=== Uninstallation Completed! ==="
-        echo "Note: Extensions in /var/tmp/sysext-creator and $EXT_DIR were kept."
-        exit 0
-        ;;
-esac
-
-echo "=== Sysext-Creator Setup v2.1 ==="
-
-# Kontrola souborů
-REQUIRED_FILES=("sysext-creator-daemon.py" "sysext-creator-builder.py" "sysext-cli.py" "sysext-creator-gui.py" "sysext-autoupdater.py" "sysext-creator-install.desktop" "sysext-cli.bash")
-for file in "${REQUIRED_FILES[@]}"; do
-    if [ ! -f "$file" ]; then echo "Error: Missing $file"; exit 1; fi
+# --- 1. Validate Base Source Files ---
+for file in "$CLI_SCRIPT" "$BUILDER_SCRIPT" "$DOCTOR_SCRIPT" "$BASH_COMP"; do
+    if [ ! -f "$file" ]; then
+        echo "❌ ERROR: Missing core file: $file"
+        exit 1
+    fi
 done
 
-mkdir -p "$USER_BIN_DIR" "$SYSTEMD_USR_DIR"
+# --- 2. Install Core CLI & Backend ---
+log "Installing core backend and CLI to $BIN_PATH..."
+mkdir -p "$BIN_PATH"
+install -m 755 "$CLI_SCRIPT" "$BIN_PATH/sysext-cli"
+install -m 755 "$BUILDER_SCRIPT" "$BIN_PATH/$BUILDER_SCRIPT"
+install -m 755 "$DOCTOR_SCRIPT" "$BIN_PATH/$DOCTOR_SCRIPT"
 
-# --- BEZPEČNOSTNÍ NASTAVENÍ DROP-ZONE ---
-echo "[1/9] Setting up Secure Drop-Zone..."
-sudo mkdir -p /var/tmp/sysext-creator
-sudo chmod 1777 /var/tmp/sysext-creator # Každý může psát, jen majitel mazat
+log "Installing Bash completion..."
+mkdir -p "$COMPLETION_PATH"
+install -m 644 "$BASH_COMP" "$COMPLETION_PATH/sysext-cli"
 
-echo "[2/9] Setting up Toolbox container..."
-if ! podman container exists sysext-builder; then
-    toolbox create -c sysext-builder
-fi
+# --- 3. Optional GUI Installation ---
+echo ""
+read -p "🖥️  Do you want to install the Graphical User Interface (GUI)? [y/N] " install_gui
+echo ""
 
-echo "[3/9] Copying scripts..."
-sudo mkdir -p "$OPT_DIR"
-sudo cp -f sysext-creator-daemon.py "$OPT_DIR/"
-sudo chmod +x "$OPT_DIR/sysext-creator-daemon.py"
+if [[ "$install_gui" =~ ^[Yy]$ ]]; then
+    if [ ! -f "$GUI_SCRIPT" ] || [ ! -f "$ICON_SOURCE" ]; then
+        echo "❌ ERROR: Missing GUI files ($GUI_SCRIPT or $ICON_SOURCE)."
+        echo "Please make sure they exist in the current directory."
+        exit 1
+    fi
 
-sudo cp -f sysext-creator-builder.py "$BIN_DIR/"
-sudo chmod +x "$BIN_DIR/sysext-creator-builder.py"
+    log "Installing GUI script..."
+    install -m 755 "$GUI_SCRIPT" "$BIN_PATH/sysext-gui-pro"
 
-sudo cp -f sysext-cli.py "$BIN_DIR/sysext-cli"
-sudo chmod +x "$BIN_DIR/sysext-cli"
+    log "Installing icon and desktop entry..."
+    mkdir -p "$ICON_PATH" "$DESKTOP_PATH"
+    cp -f "$ICON_SOURCE" "$ICON_PATH/sysext-creator.png"
 
-cp -f sysext-creator-gui.py "$USER_BIN_DIR/sysext-creator-gui"
-chmod +x "$USER_BIN_DIR/sysext-creator-gui"
-
-cp -f sysext-autoupdater.py "$USER_BIN_DIR/"
-chmod +x "$USER_BIN_DIR/sysext-autoupdater.py"
-
-echo "[4/9] Building core dependencies..."
-toolbox run -c sysext-builder python3 "/run/host$BIN_DIR/sysext-creator-builder.py" sysext-creator-deps python3-varlink python3-pyqt6 erofs-utils
-
-echo "[5/9] Deploying dependency layer..."
-sudo mkdir -p "$EXT_DIR"
-sudo cp "/var/tmp/sysext-creator/sysext-creator-deps.raw" "$EXT_DIR/sysext-creator.raw"
-sudo restorecon -v "$EXT_DIR/sysext-creator.raw"
-sudo systemd-sysext refresh
-
-echo "[6/9] Configuring Hardened Daemon Service..."
-cat <<EOF | sudo tee "$SYSTEMD_SYS_DIR/sysext-creator-daemon.service" > /dev/null
-[Unit]
-Description=Sysext Creator Daemon
-After=network.target systemd-sysext.service
-Requires=systemd-sysext.service
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/python3 $OPT_DIR/sysext-creator-daemon.py
-Restart=on-failure
-# Hardening
-NoNewPrivileges=yes
-RestrictSUIDSGID=yes
-LockPersonality=yes
-ProtectSystem=full
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now sysext-creator-daemon.service
-
-echo "[7/9] Configuring Auto-Updater..."
-cat <<EOF | tee "$SYSTEMD_USR_DIR/sysext-autoupdater.service" > /dev/null
-[Unit]
-Description=Sysext Creator Auto-Updater
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 $USER_BIN_DIR/sysext-autoupdater.py
-EOF
-
-cat <<EOF | tee "$SYSTEMD_USR_DIR/sysext-autoupdater.timer" > /dev/null
-[Unit]
-Description=Weekly Timer for Sysext Auto-Updater
-[Timer]
-OnCalendar=Mon *-*-* 06:00:00
-Persistent=true
-[Install]
-WantedBy=timers.target
-EOF
-
-systemctl --user daemon-reload
-systemctl --user enable --now sysext-autoupdater.timer
-
-echo "[8/9] Desktop Integration..."
-mkdir -p "$APP_DIR"
-cat <<EOF > "$APP_DIR/sysext-creator.desktop"
-[Desktop Entry]
-Name=Sysext Creator
-Exec=$USER_BIN_DIR/sysext-creator-gui
-Icon=sysext-creator
-Terminal=false
+    echo "[Desktop Entry]
+Version=3.1
 Type=Application
-Categories=System;Utility;
-EOF
+Name=$APP_NAME
+Comment=Manage Systemd System Extensions and Layers on Atomic Fedora
+Exec=$BIN_PATH/sysext-gui-pro
+Icon=sysext-creator
+Categories=System;Settings;Qt;
+Terminal=false
+StartupNotify=true" > "$DESKTOP_PATH/sysext-creator.desktop"
 
-echo "[9/9] Bash Completion..."
-if [ -d "$COMPLETION_DIR" ]; then
-    sudo cp sysext-cli.bash "$COMPLETION_DIR/sysext-cli"
-    sudo chmod 644 "$COMPLETION_DIR/sysext-cli"
+    if command -v update-desktop-database > /dev/null; then
+        update-desktop-database -q "$DESKTOP_PATH"
+    fi
+    if command -v gtk-update-icon-cache > /dev/null; then
+        gtk-update-icon-cache -f -t "$HOME/.local/share/icons/hicolor/" 2>/dev/null || true
+    fi
+    
+    log "GUI files installed successfully!"
+    
+    # The magical meta-step: building PyQt6 dependencies using our own CLI
+    log "Building the 'pyqt6-deps' system extension using sysext-cli..."
+    echo "This will download python3-pyqt6 and qt6-qtwayland to ensure the GUI works."
+    
+    # We call the CLI directly from where we just installed it
+    "$BIN_PATH/sysext-cli" install pyqt6-deps python3-pyqt6 qt6-qtwayland
+else
+    log "Skipping GUI installation."
 fi
 
-echo "=== Installation Completed Successfully! ==="
+echo ""
+log "✅ SUCCESS! Installation complete."
+log "You can now use 'sysext-cli' from your terminal."
+if [[ "$install_gui" =~ ^[Yy]$ ]]; then
+    log "The GUI is available in your application menu as '$APP_NAME'."
+fi
+log "Note: You might need to restart your terminal for bash completion to take effect."
