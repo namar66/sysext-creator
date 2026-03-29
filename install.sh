@@ -47,7 +47,7 @@ install -m 755 "$DOCTOR_SCRIPT" "$BIN_PATH/$DOCTOR_SCRIPT"
 log "Installing Bash completion..."
 mkdir -p "$COMPLETION_PATH"
 install -m 644 "$BASH_COMP" "$COMPLETION_PATH/sysext-cli"
-
+toolbox create sysext-builder
 # --- 3. Optional GUI Installation ---
 echo ""
 read -p "🖥️  Do you want to install the Graphical User Interface (GUI)? [y/N] " install_gui
