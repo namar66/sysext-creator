@@ -20,7 +20,7 @@ CLI_SCRIPT="sysext-cli.py"
 GUI_SCRIPT="sysext-gui-pro.py"
 BUILDER_SCRIPT="sysext-creator-builder.py"
 DOCTOR_SCRIPT="sysext-doctor.py"
-BASH_COMP="sysext-creator-cli.bash"
+BASH_COMP="sysext-cli.bash"
 ICON_SOURCE="sysext-creator-icon.png"
 
 function log() {
@@ -92,7 +92,7 @@ StartupNotify=true" > "$DESKTOP_PATH/sysext-creator.desktop"
     echo "This will download python3-pyqt6 and qt6-qtwayland to ensure the GUI works."
     
     # We call the CLI directly from where we just installed it
-    "$BIN_PATH/sysext-cli" install pyqt6-deps python3-pyqt6 qt6-qtwayland
+    "$BIN_PATH/sysext-cli" install pyqt6-deps python3-pyqt6
 else
     log "Skipping GUI installation."
 fi
