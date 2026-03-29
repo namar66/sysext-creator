@@ -2,7 +2,7 @@
 Name=Sysext-Creator
 Comment=Managing system extensions for Fedora Atomic
 Comment[cs]=Správa systémových rozšíření pro atomickou Fedoru
-Exec=sysext-gui
+Exec=sysext-gui-pro
 Icon=sysext-creator-icon
 Terminal=false
 Type=Application
