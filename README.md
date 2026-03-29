@@ -10,6 +10,7 @@ The Ultimate GUI/CLI Suite for Managing **`systemd-sysext`** and Layered Package
 
 `sysext-creator-pro` provides a safe, seamless, and user-friendly experience for adding layered applications to immutable Fedora systems without compromising the core OS integrity or requiring a full ostree commit. It manages everything from downloading DNF packages to creating highly-compressed EROFS images, handling activation, updates, and removals with an enterprise-grade focus on security and best practices.
 
+* note: Make sure your system is fully up to date.
 ## 🌟 Key Features
 
 ### 🖥️ GUI (Graphical User Interface)
