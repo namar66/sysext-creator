@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 
-# Sysext-Creator Builder v3.1
+# Sysext-Creator Builder v3.1.1
 # Fixes: Automatic /etc migration via tmpfiles.d and Manifest generation for GUI
 
 import os
@@ -53,7 +53,7 @@ def calculate_host_dependencies(packages):
     cmd = ["flatpak-spawn", "--host", "rpm-ostree", "install", "--dry-run"] + packages
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
-        
+
         # Abort immediately if rpm-ostree reports the package is already on the host
         if res.returncode != 0:
             combined_output = res.stderr + "\n" + res.stdout
@@ -69,14 +69,14 @@ def calculate_host_dependencies(packages):
 
         allowed_archs = ["noarch", host_arch]
         if host_arch == "x86_64": allowed_archs.append("i686")
-        
+
         added_pkgs = []
         parsing_added = False
-        
+
         # Dynamically build the regex pattern for allowed architectures
         arch_pattern = "|".join(allowed_archs)
         nevra_re = re.compile(fr'^(.+?)-(([0-9]+:)?([^-]+)-([^-]+))\.({arch_pattern})$')
-        
+
         # Step 1: Parse the output from rpm-ostree dry-run
         for line in res.stdout.splitlines():
             if any(line.startswith(s) for s in ["Installing ", "Added:", "Upgrading ", "Upgraded:"]):
@@ -85,7 +85,7 @@ def calculate_host_dependencies(packages):
             elif any(line.startswith(s) for s in ["Removing ", "Removed:"]):
                 parsing_added = False
                 continue
-            
+
             if parsing_added and line.startswith(" "):
                 raw_pkg = line.strip().split()[0]
                 match = nevra_re.match(raw_pkg)
@@ -103,13 +103,13 @@ def calculate_host_dependencies(packages):
                     capture_output=True, text=True, check=True
                 )
                 host_pkgs = set(line.strip() for line in rpm_res.stdout.splitlines() if line.strip())
-                
+
                 filtered_pkgs = [p for p in added_pkgs if p not in host_pkgs]
                 ignored_count = len(added_pkgs) - len(filtered_pkgs)
-                
+
                 if ignored_count > 0:
                     logging.info(f"Filtered out {ignored_count} packages already present on the host.")
-                
+
                 added_pkgs = filtered_pkgs
             except Exception as e:
                 logging.warning(f"Failed to query host RPM database for filtering: {e}")
@@ -189,7 +189,7 @@ def check_container_dependencies():
         logging.info("Attempting to install missing dependencies...")
         try:
             # Use sudo because toolbox usually requires it for dnf install
-            subprocess.run(["sudo", "dnf", "install", "-y"] + missing, check=True)
+            subprocess.run(["sudo", "LANG=C", "dnf", "install", "-y"] + missing, check=True)
             logging.info("Dependencies installed successfully.")
         except Exception as e:
             logging.error(f"Failed to install dependencies: {e}")
