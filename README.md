@@ -48,13 +48,13 @@ Ensure you have your icon named `sysext-creator-icon.png` in the source director
 
 ```bash
 # 1. Clone the repository
-git clone [https://github.com/yourusername/sysext-creator-pro.git](https://github.com/yourusername/sysext-creator-pro.git)
-cd sysext-creator-pro
+git clone https://github.com/namar66/sysext-creator.git
+cd sysext-creator
 
 # 2. Grant execution permissions to the scripts and the installer
 chmod +x sysext-gui-pro.py sysext-creator-builder.py sysext-doctor.py install.sh
 
-# 3. Run the installer (as standard user - no root required)
+# 3. Run the installer
 ./install.sh
 ```
 
