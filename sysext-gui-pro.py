@@ -5,13 +5,14 @@ import os
 import subprocess
 import logging
 import re
+import shutil
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QSplitter, QListWidget, QTableView,
                              QLineEdit, QTabWidget, QTextEdit, QLabel, QPushButton,
                              QHeaderView, QMenu, QMessageBox, QAbstractItemView,
-                             QDialog, QProgressBar, QInputDialog)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSortFilterProxyModel
-from PyQt6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon
+                             QDialog, QProgressBar, QInputDialog, QTextBrowser, QMenuBar)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QSortFilterProxyModel, QTimer
+from PyQt6.QtGui import QStandardItemModel, QStandardItem, QAction, QIcon, QPixmap
 
 # Logging configuration for debugging and background monitoring
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
@@ -22,6 +23,112 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 CACHE_DIR = os.path.expanduser("~/.cache/sysext-creator")
 EXTENSIONS_DIR = "/var/lib/extensions"
 MANIFEST_DIR = "/usr/share/sysext/manifests"
+
+# ==========================================
+# BACKGROUND WORKER: TOOLBOX REBUILD
+# ==========================================
+class ToolboxRebuildWorker(QThread):
+    log_output = pyqtSignal(str)
+    finished = pyqtSignal(bool, str)
+
+    def run(self):
+        try:
+            self.log_output.emit("Removing old 'sysext-builder' container...")
+            subprocess.run(["toolbox", "rm", "-f", "sysext-builder"], capture_output=True)
+
+            self.log_output.emit("Creating fresh 'sysext-builder' container matching host OS...")
+            self.log_output.emit("(This will download the new base image, please be patient.)")
+
+            res = subprocess.run(["toolbox", "create", "-c", "sysext-builder"], capture_output=True, text=True)
+
+            if res.returncode == 0:
+                self.finished.emit(True, "✅ Container successfully rebuilt for the new OS version.")
+            else:
+                self.finished.emit(False, f"❌ Failed to create container: {res.stderr}")
+        except Exception as e:
+            self.finished.emit(False, str(e))
+
+# ==========================================
+# UI DIALOGS: HELP & ABOUT
+# ==========================================
+class HelpDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("📖 How to Use Sysext Creator Pro")
+        self.resize(650, 500)
+        layout = QVBoxLayout(self)
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(True)
+        browser.setHtml("""
+        <h2>Welcome to Sysext Creator Pro</h2>
+        <p>This tool securely builds and manages systemd-sysext layered images for Fedora Atomic.</p>
+
+        <h3>1. Searching & Queueing</h3>
+        <p>Use the <b>Available (DNF)</b> tab to search the Fedora repositories. Select the packages you need, right-click, and add them to the <b>Transaction Queue</b>.</p>
+
+        <h3>2. Building an Extension</h3>
+        <p>Once you have your packages in the queue, click <b>Process Transaction</b>. The builder will use a background Toolbox container to safely download and compress the files into an EROFS image.</p>
+
+        <h3>3. Management & Diagnostics</h3>
+        <p>Go to the <b>Installed</b> tab to view or remove active extensions. If your system behaves weirdly, use the <b>System Doctor</b> tab to scan for RPM file conflicts or /etc symlink overrides.</p>
+
+        <p><i>Note: Removing or deploying an extension requires root privileges via Polkit.</i></p>
+        """)
+        layout.addWidget(browser)
+        btn = QPushButton("Got it!")
+        btn.clicked.connect(self.accept)
+        layout.addWidget(btn)
+
+class AboutDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("ℹ️ About")
+        self.setFixedSize(480, 200) # Slightly larger breathing room
+        layout = QHBoxLayout(self)
+
+        icon_label = QLabel()
+        icon_path = os.path.expanduser("~/.local/share/icons/hicolor/256x256/apps/sysext-creator.png")
+        if os.path.exists(icon_path):
+            pix = QPixmap(icon_path).scaled(128, 128, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            icon_label.setPixmap(pix)
+        else:
+            icon_label.setText("No Icon") # Fallback
+        layout.addWidget(icon_label)
+
+        text_label = QLabel(
+            "<h2>Sysext Creator Pro</h2>"
+            "<p><b>Version:</b> 3.1.1</p>"
+            "<p>The ultimate GUI for Fedora Atomic layers.</p>"
+            "<p>Built to survive system updates and save you from writing bash scripts.</p>"
+        )
+        # TAHLE RÁDKA TI TAM CHYBĚLA!
+        text_label.setWordWrap(True) # Force automatic line breaking
+        text_label.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(text_label)
+
+# ==========================================
+# BACKGROUND WORKER: TOOLBOX UPDATE
+# ==========================================
+class ToolboxUpdateWorker(QThread):
+    log_output = pyqtSignal(str)
+    finished = pyqtSignal(bool, str)
+
+    def run(self):
+        # We run sudo dnf update -y inside the container
+        # Since the user is in the wheel group inside toolbox, sudo works without password
+        cmd = ["toolbox", "run", "-c", "sysext-builder", "sudo", "dnf", "update", "-y"]
+        try:
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in process.stdout:
+                self.log_output.emit(line.strip())
+
+            process.wait()
+            if process.returncode == 0:
+                self.finished.emit(True, "✅ Toolbox container updated successfully.")
+            else:
+                self.finished.emit(False, f"❌ Update failed (Exit code: {process.returncode})")
+        except Exception as e:
+            self.finished.emit(False, str(e))
 
 # ==========================================
 # BACKGROUND WORKER: DNF OPERATIONS
@@ -353,10 +460,44 @@ class SysextAdvancedGUI(QMainWindow):
         self.worker = None
         self.build_worker = None
         self.setup_ui()
+        QTimer.singleShot(500, self.perform_startup_checks)
 
     def setup_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
+
+        # ==========================================
+        # TOP MENU BAR (File, Tools, Help)
+        # ==========================================
+        menubar = self.menuBar()
+
+        # File Menu
+        file_menu = menubar.addMenu("File")
+        quit_act = QAction("Quit", self)
+        quit_act.setShortcut("Ctrl+Q")
+        quit_act.triggered.connect(self.close)
+        file_menu.addAction(quit_act)
+
+        # Tools Menu
+        tools_menu = menubar.addMenu("Tools")
+        upd_act = QAction("🔄 Update Toolbox Container", self)
+        upd_act.triggered.connect(self.update_toolbox_container)
+        tools_menu.addAction(upd_act)
+
+        clear_act = QAction("🧹 Clear Unused Image Cache", self)
+        clear_act.triggered.connect(self.clear_image_cache)
+        tools_menu.addAction(clear_act)
+
+        # Help Menu
+        help_menu = menubar.addMenu("Help")
+        howto_act = QAction("📖 How to Use", self)
+        howto_act.triggered.connect(self.show_help)
+        help_menu.addAction(howto_act)
+
+        about_act = QAction("ℹ️ About", self)
+        about_act.triggered.connect(self.show_about)
+        help_menu.addAction(about_act)
+
         # ==========================================
         # SET APPLICATION ICON (In-Window Decoration)
         # ==========================================
@@ -709,6 +850,99 @@ class SysextAdvancedGUI(QMainWindow):
                     w.wait(1000)
         except: pass
         event.accept()
+
+    # ==========================================
+    # MENU ACTIONS
+    # ==========================================
+    def show_help(self):
+        dlg = HelpDialog(self)
+        dlg.exec()
+
+    def show_about(self):
+        dlg = AboutDialog(self)
+        dlg.exec()
+
+    def clear_image_cache(self):
+        msg = "Are you sure you want to clear the local image cache?\n\nThis will delete all unapplied .raw extensions waiting in ~/.cache/sysext-creator/."
+        reply = QMessageBox.question(self, 'Clear Cache', msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            if os.path.exists(CACHE_DIR):
+                try:
+                    shutil.rmtree(CACHE_DIR)
+                    os.makedirs(CACHE_DIR, exist_ok=True)
+                    QMessageBox.information(self, "Success", "Cache has been completely cleared.")
+                except Exception as e:
+                    QMessageBox.warning(self, "Error", f"Failed to clear cache: {e}")
+
+    def update_toolbox_container(self):
+        msg = "Do you want to run 'dnf update' inside the sysext-builder Toolbox container?\n\nThis will ensure your container uses the latest libraries and avoids dependency mismatches. It may take a few minutes."
+        reply = QMessageBox.question(self, 'Update Container', msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.build_dialog = BuildProgressDialog(self)
+            self.build_dialog.setWindowTitle("Updating Container Environment")
+            self.build_dialog.status_label.setText("Starting DNF update inside sysext-builder...")
+            self.build_dialog.show()
+
+            self.upd_worker = ToolboxUpdateWorker()
+            self.upd_worker.log_output.connect(self.build_dialog.append_log)
+            self.upd_worker.finished.connect(lambda s, m: self.build_dialog.close_btn.setEnabled(True))
+            self.upd_worker.finished.connect(lambda s, m: self.build_dialog.status_label.setText(m))
+            self.upd_worker.start()
+
+    def perform_startup_checks(self):
+        try:
+            # 1. Zjistíme verzi hostitele (Fedory)
+            host_ver = None
+            with open("/etc/os-release", "r") as f:
+                for line in f:
+                    if line.startswith("VERSION_ID="):
+                        host_ver = line.strip().split("=")[1].strip('"')
+
+            # 2. Zkontrolujeme, jestli kontejner vůbec existuje (rychlý podman check)
+            check_cmd = subprocess.run(["podman", "container", "exists", "sysext-builder"])
+            if check_cmd.returncode != 0:
+                self.prompt_container_rebuild(
+                    "Missing Build Environment",
+                    "The 'sysext-builder' container does not exist. It is required to safely build extensions.\n\nWould you like to create it now?"
+                )
+                return
+
+            # 3. Zkontrolujeme verzi OS uvnitř kontejneru
+            # Spustíme toolbox run, který ho i probudí, pokud spí
+            res = subprocess.run(["toolbox", "run", "-c", "sysext-builder", "cat", "/etc/os-release"], capture_output=True, text=True)
+            if res.returncode == 0:
+                cont_ver = None
+                for line in res.stdout.splitlines():
+                    if line.startswith("VERSION_ID="):
+                        cont_ver = line.strip().split("=")[1].strip('"')
+
+                # Porovnání
+                if host_ver and cont_ver and host_ver != cont_ver:
+                    self.prompt_container_rebuild(
+                        "OS Upgrade Detected",
+                        f"Your Host OS is Fedora {host_ver}, but the builder container is stuck on Fedora {cont_ver}.\n\nWould you like to rebuild the container now to prevent library conflicts?"
+                    )
+
+        except Exception as e:
+            logging.warning(f"Startup check failed: {e}")
+
+    def prompt_container_rebuild(self, title, msg):
+        """A helper function that recycles our Rebuild Worker menu from Tools"""
+        reply = QMessageBox.question(self, title, msg, QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+
+        if reply == QMessageBox.StandardButton.Yes:
+            self.build_dialog = BuildProgressDialog(self)
+            self.build_dialog.setWindowTitle(title)
+            self.build_dialog.status_label.setText("Working with podman/toolbox... This may take a few minutes to download the base image.")
+            self.build_dialog.show()
+
+            # Znovu použijeme Workera, kterého jsi předtím vyrobil!
+            self.rebuild_worker = ToolboxRebuildWorker()
+            self.rebuild_worker.log_output.connect(self.build_dialog.append_log)
+            self.rebuild_worker.finished.connect(lambda s, m: self.build_dialog.close_btn.setEnabled(True))
+            self.rebuild_worker.finished.connect(lambda s, m: self.build_dialog.status_label.setText(m))
+            self.rebuild_worker.start()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
