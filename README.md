@@ -1,4 +1,4 @@
-# Sysext Creator (v3.1)
+# Sysext Creator (v3.1.1)
 
 ![License](https://img.shields.io/badge/license-GPLv2-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Fedora_Atomic-3870b2.svg)
@@ -38,7 +38,7 @@ The suite is built with a strong focus on security and the XDG Base Directory Sp
 
 ## 📦 Prerequisites
 
-* Fedora Atomic (Kinoite, Silverblue, etc.).
+* Fedora Atomic (Kinoite, Silverblue, etc.) must be fully up to date.
 * Toolbox installed.
 * Polkit (`pkexec`) capability.
 * PyQt6, `erofs-utils`, and `systemd-dissect` on the host.
