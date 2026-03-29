@@ -53,9 +53,29 @@ def calculate_host_dependencies(packages):
     cmd = ["flatpak-spawn", "--host", "rpm-ostree", "install", "--dry-run"] + packages
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+        
+        # Abort immediately if rpm-ostree reports the package is already on the host
+        if res.returncode != 0:
+            combined_output = res.stderr + "\n" + res.stdout
+            if "is already provided by" in combined_output:
+                logging.error("Build aborted: One or more requested packages are already installed on the host OS.")
+                logging.error(combined_output.strip())
+                sys.exit(1)
+            else:
+                logging.warning(f"rpm-ostree dry-run returned an error: {combined_output.strip()}")
+
+        arch_res = subprocess.run(["uname", "-m"], capture_output=True, text=True, check=True)
+        host_arch = arch_res.stdout.strip()
+
+        allowed_archs = ["noarch", host_arch]
+        if host_arch == "x86_64": allowed_archs.append("i686")
+        
         added_pkgs = []
         parsing_added = False
-        nevra_re = re.compile(r'^(.+?)-(([0-9]+:)?([^-]+)-([^-]+))\.(x86_64|noarch|i686)$')
+        
+        # Dynamically build the regex pattern for allowed architectures
+        arch_pattern = "|".join(allowed_archs)
+        nevra_re = re.compile(fr'^(.+?)-(([0-9]+:)?([^-]+)-([^-]+))\.({arch_pattern})$')
         
         # Step 1: Parse the output from rpm-ostree dry-run
         for line in res.stdout.splitlines():
@@ -78,7 +98,6 @@ def calculate_host_dependencies(packages):
         if added_pkgs:
             logging.info("Cross-checking with host RPM database to filter out existing overlays...")
             try:
-                # Query the host RPM db for strictly Name.Arch format to match our parsed list
                 rpm_res = subprocess.run(
                     ["rpm", "--root", "/run/host", "-qa", "--qf", "%{NAME}.%{ARCH}\n"],
                     capture_output=True, text=True, check=True
@@ -104,7 +123,7 @@ def calculate_host_dependencies(packages):
         return added_pkgs
     except Exception as e:
         logging.error(f"Dependency calculation failed: {e}")
-        return packages
+        sys.exit(1)
 
 def sync_host_repos():
     """Synchronize repositories and GPG keys from the host to the toolbox."""
