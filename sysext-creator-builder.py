@@ -56,6 +56,8 @@ def calculate_host_dependencies(packages):
         added_pkgs = []
         parsing_added = False
         nevra_re = re.compile(r'^(.+?)-(([0-9]+:)?([^-]+)-([^-]+))\.(x86_64|noarch|i686)$')
+        
+        # Step 1: Parse the output from rpm-ostree dry-run
         for line in res.stdout.splitlines():
             if any(line.startswith(s) for s in ["Installing ", "Added:", "Upgrading ", "Upgraded:"]):
                 parsing_added = True
@@ -63,6 +65,7 @@ def calculate_host_dependencies(packages):
             elif any(line.startswith(s) for s in ["Removing ", "Removed:"]):
                 parsing_added = False
                 continue
+            
             if parsing_added and line.startswith(" "):
                 raw_pkg = line.strip().split()[0]
                 match = nevra_re.match(raw_pkg)
@@ -71,13 +74,37 @@ def calculate_host_dependencies(packages):
                     formatted = f"{name_pkg}.{arch}"
                     if formatted not in added_pkgs: added_pkgs.append(formatted)
 
+        # Step 2: Filter out packages that are already present in the host RPM database (e.g., layered overlays)
         if added_pkgs:
-            logging.info(f"Found {len(added_pkgs)} packages to download (including dependencies).")
+            logging.info("Cross-checking with host RPM database to filter out existing overlays...")
+            try:
+                # Query the host RPM db for strictly Name.Arch format to match our parsed list
+                rpm_res = subprocess.run(
+                    ["rpm", "--root", "/run/host", "-qa", "--qf", "%{NAME}.%{ARCH}\n"],
+                    capture_output=True, text=True, check=True
+                )
+                host_pkgs = set(line.strip() for line in rpm_res.stdout.splitlines() if line.strip())
+                
+                filtered_pkgs = [p for p in added_pkgs if p not in host_pkgs]
+                ignored_count = len(added_pkgs) - len(filtered_pkgs)
+                
+                if ignored_count > 0:
+                    logging.info(f"Filtered out {ignored_count} packages already present on the host.")
+                
+                added_pkgs = filtered_pkgs
+            except Exception as e:
+                logging.warning(f"Failed to query host RPM database for filtering: {e}")
+
+        # Final reporting
+        if added_pkgs:
+            logging.info(f"Found {len(added_pkgs)} packages to download (after filtering).")
         else:
             logging.info("No additional dependencies needed.")
 
         return added_pkgs
-    except: return packages
+    except Exception as e:
+        logging.error(f"Dependency calculation failed: {e}")
+        return packages
 
 def sync_host_repos():
     """Synchronize repositories and GPG keys from the host to the toolbox."""
