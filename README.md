@@ -1,82 +1,76 @@
-# Sysext Creator (v3.0)
+# Sysext Creator (v3.1)
 
 ![License](https://img.shields.io/badge/license-GPLv2-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Fedora_Atomic-3870b2.svg)
 ![Experience](https://img.shields.io/badge/user-Linux__admin-black?logo=linux)
 
-A robust, atomic-first system extension manager for immutable Linux distributions (Fedora Silverblue, Kinoite, CoreOS). 
+# 🚀 Sysext Creator Pro
 
-Sysext Creator allows you to cleanly overlay RPM packages (and their precise dependencies) onto your read-only root filesystem using `systemd-sysext` and `systemd-confext`.
-## ⚠️ Prerequisites
+The Ultimate GUI/CLI Suite for Managing **`systemd-sysext`** and Layered Packages on **Atomic Fedora** (Kinoite/Silverblue/Sericea).
 
-* **Fedora Atomic Desktop** (Silverblue, Kinoite, Sericea, Onyx, or CoreOS).
-* **Toolbox** and **Podman** must be installed (included by default in Fedora).
-* **Wheel Group Membership:** Your user account *must* be a member of the `wheel` group (this is the default for the main user created during Fedora installation). This is required to securely communicate with the background daemon via UNIX sockets without entering a password.
-## ✨ Key Features
+`sysext-creator-pro` provides a safe, seamless, and user-friendly experience for adding layered applications to immutable Fedora systems without compromising the core OS integrity or requiring a full ostree commit. It manages everything from downloading DNF packages to creating highly-compressed EROFS images, handling activation, updates, and removals with an enterprise-grade focus on security and best practices.
 
-* **Host-Aware Dependency Resolution:** Uses `rpm-ostree install --dry-run` to calculate the exact delta of missing packages. It never downloads bloated dependencies your host OS already has.
-* **Isolated Build Environment:** Downloads and extracts RPMs safely inside a Toolbox container (`dnf`, `rpm2cpio`), leaving your host OS completely untouched during the build phase.
-* **Rootless Operation via IPC:** The backend daemon runs as root, but your user tools (GUI/CLI) communicate with it securely via a **Varlink UNIX socket**. No annoying Polkit password prompts required for daily usage.
-* **Smart `noexec` Workaround:** Automatically detects executable scripts in `/etc` (like SDDM setups), relocates them to `/usr/libexec`, and generates `tmpfiles.d` symlinks to bypass `systemd-confext` execution restrictions.
-* **SELinux & Permissions Guard:** Enforces `root:root` ownership and injects correct host SELinux contexts during the `mkfs.erofs` image creation to prevent boot hangs.
-* **PyQt6 GUI & CLI:** Comes with a full-featured graphical interface and a scriptable command-line tool.
-* **Auto-Updater:** A systemd-timer-driven background service that keeps your layered packages up to date.
+## 🌟 Key Features
+
+### 🖥️ GUI (Graphical User Interface)
+* **Real-time DNF Search:** Blazing fast search and filtering of >60,000 packages directly from the Fedora repos.
+* **Transaction Queue:** Add packages to a "shopping cart" before building the final image.
+* **Extension Management:** View installed/cached system extensions, their status (Active/Inactive), and detailed package lists (Requested vs. Full Dependencies).
+* **Smart Doctor:** Run deep, privileged (polkit) diagnostics to identify `/etc` symlink status, OS overwrites, or cross-extension collisions.
+* **System Integration:** Installs to your local `~/.local` directory for full persistence and integration with the application menu (tested on KDE).
+
+### 🛠️ CLI Builder (under the hood)
+* **Atomic Operation:** Builds in a clean, throwaway Toolbox container without polluting your host.
+* **Smart Pruning:** Automatically prunes shadowed files already present on the host OS to reduce image size (saves ~10% disk space).
+* **Dependency Tracking:** Generates detailed `manifest.txt`, `version.txt`, and full dependency trees (`deps.txt`) for auditability.
+* **EROFS Compression:** Uses highly efficient `mkfs.erofs` for smaller, faster images.
 
 ## 🏗️ Architecture
 
-1.  **Daemon (`sysext-creator-daemon.py`):** The privileged backend. It strictly handles mounting, deploying `.raw` files to `/var/lib/extensions`, and refreshing `systemd-sysext`. Hardened via systemd directives.
-2.  **Builder (`sysext-creator-builder.py`):** The isolated engine running inside a Toolbox container.
-3.  **Clients (`sysext-creator-gui.py`, `sysext-cli.py`):** Unprivileged frontends for user interaction.
+The suite is built with a strong focus on security and the XDG Base Directory Specification:
+
+1.  **GUI (`sysext-gui-pro`):** A standard Qt6 application. It communicates with the system via `pkexec` only when administrative actions (deployment, removal, diagnostics) are required.
+2.  **Builder (`sysext-creator-builder.py`):** Operates entirely within a Toolbox container. It fetches packages, unpacks RPMs, prunes duplicates, and creates the EROFS raw image into your local cache directory.
+3.  **Local XDG Compliance:**
+    * **Cache:** Built `.raw` images are temporarily stored in `~/.cache/sysext-creator`.
+    * **Executables & Desktop:** Installed locally to `~/.local/bin` and `~/.local/share/applications`.
+
+## 📦 Prerequisites
+
+* Fedora Atomic (Kinoite, Silverblue, etc.).
+* Toolbox installed.
+* Polkit (`pkexec`) capability.
+* PyQt6, `erofs-utils`, and `systemd-dissect` on the host.
 
 ## 🚀 Installation
 
-1. Clone this repository to a temporary directory:
-   ```bash
-   git clone [https://github.com/YOUR_USERNAME/sysext-creator.git](https://github.com/YOUR_USERNAME/sysext-creator.git)
-   cd sysext-creator
-   ```
-2. Run the automated bootstrap installer:
-```Bash
-chmod +x install.sh
+Ensure you have your icon named `sysext-creator-icon.png` in the source directory.
+
+```bash
+# 1. Clone the repository
+git clone [https://github.com/yourusername/sysext-creator-pro.git](https://github.com/yourusername/sysext-creator-pro.git)
+cd sysext-creator-pro
+
+# 2. Grant execution permissions to the scripts and the installer
+chmod +x sysext-gui-pro.py sysext-creator-builder.py sysext-doctor.py install.sh
+
+# 3. Run the installer (as standard user - no root required)
 ./install.sh
 ```
-Note: The installer will automatically spin up a Toolbox container, build an initial system extension containing required Python dependencies (python3-varlink, python3-pyqt6), and set up the systemd daemon.
-💻 Usage
-Graphical Interface
-Simply launch Sysext Creator from your desktop application menu.
-# Install a new package (e.g., htop)
-Note: sysext-cli install <image_name>  <package_name>  <package_>
-```Bash
-sysext-cli install htop htop
+
+A new "Sysext Creator Pro" entry will appear in your application menu.
+
+## 📜 Uninstallation
+
+We are XDG compliant and leave your core system untouched. To remove the local user installation:
+
+```bash
+rm -f ~/.local/bin/{sysext-gui-pro,sysext-creator-builder.py,sysext-doctor.py}
+rm -f ~/.local/share/applications/sysext-creator.desktop
+rm -f ~/.local/share/icons/hicolor/128x128/apps/sysext-creator.png
+rm -rf ~/.cache/sysext-creator
 ```
-# List active extensions
-```Bash
-sysext-cli list
-```
-# Remove an extension
-```Bash
-sysext-cli remove htop
-```
-🛠️ Diagnostics
-If you suspect an extension is conflicting with base system RPMs, use the built-in diagnostic tool (requires sudo):
-```Bash
-sudo python3 /opt/sysext-creator/sysext-doctor.py
-```
-## 🚑 Emergency Rescue (System Won't Boot)
 
-Because `sysext-creator` modifies the root filesystem overlay, a highly conflicting package might occasionally prevent your system from booting properly (e.g., a broken display manager configuration). 
+---
 
-**You do not need to reinstall your OS or use a live USB!** Fedora Atomic and systemd provide a built-in safety net to temporarily disable all extensions.
-
-If your system hangs during boot:
-1. Hard reboot your computer.
-2. When the **GRUB boot menu** appears, press `e` to edit the current boot entry.
-3. Find the line that starts with `linux` (or `linuxefi`).
-4. Move your cursor to the very end of that line, add a space, and type exactly this:
-   `systemd.sysext=0 systemd.confext=0`
-5. Press `Ctrl+X` (or `F10`) to boot.
-
-Your system will boot in its pure, factory-default state, completely ignoring all custom `.raw` extensions. Once logged in, simply open a terminal, remove the problematic extension using `sysext-cli remove <name>`, and reboot normally.
-
-📄 License
-This project is licensed under the GPLv2 License - see the LICENSE file for details.
+*This project is built by developers who understand that an immutable OS shouldn't mean a locked-down experience. Manage your layers responsibly.*
