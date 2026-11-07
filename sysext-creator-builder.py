@@ -1,7 +1,8 @@
 #!/usr/bin/python3
 # Sysext-Creator Builder v3.2
-# Fedora 45 DNF5 support, bin/sbin merge, opt-relocation, systemd unit auto-reload
-
+# Phase 1: Smart vendor relocation for /etc -> /usr, minimal tmpfiles.d fallback
+# bin/sbin merge, opt-relocation, systemd unit auto-reload
+# Fedora 45 DNF5 & usr-repo relocation support, fast host RPM indexing, clean /etc manifests
 import os
 import subprocess
 import sys
@@ -15,6 +16,21 @@ import stat
 CACHE_DIR = os.path.expanduser("~/.cache/sysext-creator")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+
+# Safe relocation map: Relative path in /etc -> Relative target path in /usr
+VENDOR_RELOCATIONS = {
+    "udev/rules.d": "usr/lib/udev/rules.d",
+    "sysctl.d": "usr/lib/sysctl.d",
+    "modules-load.d": "usr/lib/modules-load.d",
+    "binfmt.d": "usr/lib/binfmt.d",
+    "tmpfiles.d": "usr/lib/tmpfiles.d",
+    "environment.d": "usr/lib/environment.d",
+    "systemd/system": "usr/lib/systemd/system",
+    "systemd/user": "usr/lib/systemd/user",
+    "security/limits.d": "usr/lib/security/limits.d",
+    "pam.d": "usr/lib/pam.d",
+    "polkit-1/rules.d": "usr/share/polkit-1/rules.d",
+}
 
 def safe_rmtree(path):
     """Recursively removes a directory handling read-only permissions."""
@@ -261,6 +277,17 @@ def prune_shadowed_files(staging_root):
     else:
         logging.info("No host OS shadowing detected.")
 
+def clean_empty_directories(path):
+    """Removes empty directories bottom-up."""
+    for root, dirs, files in os.walk(path, topdown=False):
+        for d in dirs:
+            dir_path = os.path.join(root, d)
+            if not os.path.islink(dir_path) and not os.listdir(dir_path):
+                try:
+                    os.rmdir(dir_path)
+                except Exception:
+                    pass
+
 def main():
     parser = argparse.ArgumentParser(description="Sysext-Creator EROFS Builder")
     parser.add_argument("--name", required=True, help="Name of the resulting system extension")
@@ -310,13 +337,13 @@ def main():
 
         logging.info(f"Detected version: {version}")
 
-        # Extract RPMs into staging rootfs
+        # Rozbalení balíčků
         for rpm in rpms_to_extract:
             ps = subprocess.Popen(["rpm2cpio", rpm], stdout=subprocess.PIPE)
             subprocess.run(["cpio", "-idmv"], stdin=ps.stdout, cwd=staging_root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             ps.wait()
 
-        # 1. Fedora Bin/Sbin Merge: Přesun z /usr/sbin do /usr/bin
+        # 1. Fedora Bin/Sbin Merge
         usr_sbin = os.path.join(staging_root, "usr", "sbin")
         usr_bin = os.path.join(staging_root, "usr", "bin")
         if os.path.exists(usr_sbin) and not os.path.islink(usr_sbin):
@@ -335,7 +362,7 @@ def main():
                         shutil.move(s_item, d_item)
             safe_rmtree(usr_sbin)
 
-        # 2. Bezpečná relokace /opt do /usr/lib/opt (kvůli OSTree symlinku /opt -> /var/opt)
+        # 2. Relokace /opt do /usr/lib/opt
         opt_src = os.path.join(staging_root, "opt")
         if os.path.exists(opt_src):
             logging.info("Migrating /opt payload to /usr/lib/opt...")
@@ -347,21 +374,37 @@ def main():
                 shutil.move(s_item, d_item)
             safe_rmtree(opt_src)
 
-        # 3. Odstranění /var a případných DNF lockfile
+        # 3. Odstranění /var
         var_src = os.path.join(staging_root, "var")
         if os.path.exists(var_src):
             logging.warning("Discarding payload in /var (/var is not supported by systemd-sysext).")
             safe_rmtree(var_src)
 
-        # 4. Smart Pruning vůči hostitelské RPM databázi
-        prune_shadowed_files(staging_root)
-
-        # 5. /etc migrace do tmpfiles.d
+        # 4. FÁZE 1: Smart Vendor Relocation z /etc do /usr
         etc_src = os.path.join(staging_root, "etc")
-        migrated_etc_files = []
-
         if os.path.exists(etc_src):
-            logging.info(f"Migrating /etc payload to tmpfiles.d for {name}...")
+            for etc_rel, usr_rel in VENDOR_RELOCATIONS.items():
+                src_dir = os.path.join(etc_src, etc_rel)
+                if os.path.exists(src_dir):
+                    dest_dir = os.path.join(staging_root, usr_rel)
+                    os.makedirs(dest_dir, exist_ok=True)
+                    logging.info(f"Vendor Relocation: Moving /etc/{etc_rel} -> /{usr_rel}...")
+                    for item in os.listdir(src_dir):
+                        s = os.path.join(src_dir, item)
+                        d = os.path.join(dest_dir, item)
+                        if os.path.isdir(s):
+                            shutil.copytree(s, d, dirs_exist_ok=True)
+                            safe_rmtree(s)
+                        else:
+                            shutil.move(s, d)
+                    safe_rmtree(src_dir)
+
+            clean_empty_directories(etc_src)
+
+        # 5. Zbytkové /etc: Fallback migrace přes tmpfiles.d (pouze pokud v /etc ještě něco zbylo)
+        migrated_etc_files = []
+        if os.path.exists(etc_src) and os.listdir(etc_src):
+            logging.info(f"Migrating non-relocatable /etc files to tmpfiles.d for {name}...")
             etc_template_dir = f"usr/lib/sysext-creator/etc-template/{name}"
             full_template_path = os.path.join(staging_root, etc_template_dir)
             os.makedirs(full_template_path, exist_ok=True)
@@ -383,10 +426,16 @@ def main():
             tmp_dir = os.path.join(staging_root, "usr/lib/tmpfiles.d")
             os.makedirs(tmp_dir, exist_ok=True)
             with open(os.path.join(tmp_dir, f"sysext-creator-{name}.conf"), "w") as f:
-                f.write("# Generated by Sysext-Creator\n")
+                f.write("# Generated by Sysext-Creator (Fallback application config)\n")
                 f.write("\n".join(tmpfiles_content) + "\n")
+        elif os.path.exists(etc_src):
+            # Pokud po relokaci zbyly jen prázdné adresáře
+            safe_rmtree(etc_src)
 
-        # 6. Kontrola systemd unitů pro EXTENSION_RELOAD_MANAGER
+        # 6. Smart Pruning vůči hostitelské RPM databázi
+        prune_shadowed_files(staging_root)
+
+        # 7. Kontrola systemd unitů pro EXTENSION_RELOAD_MANAGER
         systemd_units_dir = os.path.join(staging_root, "usr", "lib", "systemd", "system")
         has_systemd_units = False
         if os.path.exists(systemd_units_dir):
@@ -395,7 +444,7 @@ def main():
                     has_systemd_units = True
                     break
 
-        # 7. extension-release konfigurace (s ID a VERSION_ID z hostitele)
+        # 8. extension-release konfigurace
         os_info = get_os_info()
         rel_dir = os.path.join(staging_root, "usr/lib/extension-release.d")
         os.makedirs(rel_dir, exist_ok=True)
@@ -407,7 +456,7 @@ def main():
                 f.write("EXTENSION_RELOAD_MANAGER=1\n")
                 logging.info("Detected systemd units: added EXTENSION_RELOAD_MANAGER=1 to release metadata.")
 
-        # 8. Generování manifestů
+        # 9. Generování manifestů
         manifest_dir = os.path.join(staging_root, "usr/share/sysext/manifests")
         os.makedirs(manifest_dir, exist_ok=True)
 
@@ -417,6 +466,7 @@ def main():
         with open(os.path.join(manifest_dir, f"{name}.version"), "w") as f:
             f.write(version + "\n")
 
+        # Manifest pro /etc vznikne pouze pokud nějaké symlinky reálně existují
         if migrated_etc_files:
             with open(os.path.join(manifest_dir, f"{name}-etc.txt"), "w") as f:
                 f.write("\n".join(migrated_etc_files) + "\n")
@@ -436,7 +486,7 @@ def main():
         with open(os.path.join(manifest_dir, f"{name}-deps.txt"), "w") as f:
             f.write("\n".join(sorted(deps_list)) + "\n")
 
-        # 9. Tvorba EROFS obrazu
+        # 10. Tvorba EROFS obrazu
         out_file = os.path.join(CACHE_DIR, f"{name}.raw")
         tmp_out_file = out_file + ".tmp"
 
