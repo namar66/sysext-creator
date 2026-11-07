@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 # Sysext-Creator Builder v3.2
-# Fedora 45 DNF5 & usr-repo relocation support, fast host RPM indexing, clean /etc manifests
+# Fedora 45 DNF5 support, bin/sbin merge, opt-relocation, systemd unit auto-reload
 
 import os
 import subprocess
@@ -222,40 +222,39 @@ def prune_shadowed_files(staging_root):
         return
 
     pruned_count = 0
-    for target_dir in ["usr", "opt"]:
-        staging_target = os.path.join(staging_root, target_dir)
-        if not os.path.exists(staging_target):
-            continue
+    staging_target = os.path.join(staging_root, "usr")
+    if not os.path.exists(staging_target):
+        return
 
-        for root, dirs, files in os.walk(staging_target, topdown=False):
-            for f in files:
-                full_path = os.path.join(root, f)
-                rel_path = os.path.relpath(full_path, staging_root)
+    for root, dirs, files in os.walk(staging_target, topdown=False):
+        for f in files:
+            full_path = os.path.join(root, f)
+            rel_path = os.path.relpath(full_path, staging_root)
+            abs_rel_path = "/" + rel_path
+
+            if abs_rel_path in host_owned_files:
+                try:
+                    os.remove(full_path)
+                    pruned_count += 1
+                except Exception as e:
+                    logging.warning(f"Failed to prune {abs_rel_path}: {e}")
+
+        for d in list(dirs):
+            dir_path = os.path.join(root, d)
+            if os.path.islink(dir_path):
+                rel_path = os.path.relpath(dir_path, staging_root)
                 abs_rel_path = "/" + rel_path
-
                 if abs_rel_path in host_owned_files:
                     try:
-                        os.remove(full_path)
+                        os.remove(dir_path)
                         pruned_count += 1
-                    except Exception as e:
-                        logging.warning(f"Failed to prune {abs_rel_path}: {e}")
-
-            for d in list(dirs):
-                dir_path = os.path.join(root, d)
-                if os.path.islink(dir_path):
-                    rel_path = os.path.relpath(dir_path, staging_root)
-                    abs_rel_path = "/" + rel_path
-                    if abs_rel_path in host_owned_files:
-                        try:
-                            os.remove(dir_path)
-                            pruned_count += 1
-                        except Exception:
-                            pass
-                elif not os.listdir(dir_path):
-                    try:
-                        os.rmdir(dir_path)
                     except Exception:
                         pass
+            elif not os.listdir(dir_path):
+                try:
+                    os.rmdir(dir_path)
+                except Exception:
+                    pass
 
     if pruned_count > 0:
         logging.info(f"Smart Pruning: Removed {pruned_count} files owned by host OS.")
@@ -317,16 +316,47 @@ def main():
             subprocess.run(["cpio", "-idmv"], stdin=ps.stdout, cwd=staging_root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             ps.wait()
 
-        # Prune /var since systemd-sysext does not merge it
+        # 1. Fedora Bin/Sbin Merge: Přesun z /usr/sbin do /usr/bin
+        usr_sbin = os.path.join(staging_root, "usr", "sbin")
+        usr_bin = os.path.join(staging_root, "usr", "bin")
+        if os.path.exists(usr_sbin) and not os.path.islink(usr_sbin):
+            logging.info("Merging /usr/sbin into /usr/bin (Fedora 42+ compatibility)...")
+            os.makedirs(usr_bin, exist_ok=True)
+            for item in os.listdir(usr_sbin):
+                s_item = os.path.join(usr_sbin, item)
+                d_item = os.path.join(usr_bin, item)
+                if not os.path.exists(d_item):
+                    shutil.move(s_item, d_item)
+                else:
+                    if os.path.isdir(s_item):
+                        shutil.copytree(s_item, d_item, dirs_exist_ok=True)
+                        safe_rmtree(s_item)
+                    else:
+                        shutil.move(s_item, d_item)
+            safe_rmtree(usr_sbin)
+
+        # 2. Bezpečná relokace /opt do /usr/lib/opt (kvůli OSTree symlinku /opt -> /var/opt)
+        opt_src = os.path.join(staging_root, "opt")
+        if os.path.exists(opt_src):
+            logging.info("Migrating /opt payload to /usr/lib/opt...")
+            target_opt = os.path.join(staging_root, "usr", "lib", "opt")
+            os.makedirs(target_opt, exist_ok=True)
+            for item in os.listdir(opt_src):
+                s_item = os.path.join(opt_src, item)
+                d_item = os.path.join(target_opt, item)
+                shutil.move(s_item, d_item)
+            safe_rmtree(opt_src)
+
+        # 3. Odstranění /var a případných DNF lockfile
         var_src = os.path.join(staging_root, "var")
         if os.path.exists(var_src):
             logging.warning("Discarding payload in /var (/var is not supported by systemd-sysext).")
             safe_rmtree(var_src)
 
-        # Smart Pruning against host RPMs
+        # 4. Smart Pruning vůči hostitelské RPM databázi
         prune_shadowed_files(staging_root)
 
-        # /etc migration to tmpfiles.d
+        # 5. /etc migrace do tmpfiles.d
         etc_src = os.path.join(staging_root, "etc")
         migrated_etc_files = []
 
@@ -356,7 +386,16 @@ def main():
                 f.write("# Generated by Sysext-Creator\n")
                 f.write("\n".join(tmpfiles_content) + "\n")
 
-        # extension-release definition
+        # 6. Kontrola systemd unitů pro EXTENSION_RELOAD_MANAGER
+        systemd_units_dir = os.path.join(staging_root, "usr", "lib", "systemd", "system")
+        has_systemd_units = False
+        if os.path.exists(systemd_units_dir):
+            for f in os.listdir(systemd_units_dir):
+                if f.endswith((".service", ".socket", ".timer", ".target", ".path")):
+                    has_systemd_units = True
+                    break
+
+        # 7. extension-release konfigurace (s ID a VERSION_ID z hostitele)
         os_info = get_os_info()
         rel_dir = os.path.join(staging_root, "usr/lib/extension-release.d")
         os.makedirs(rel_dir, exist_ok=True)
@@ -364,8 +403,11 @@ def main():
             f.write(f"ID={os_info.get('ID')}\n")
             f.write(f"VERSION_ID={os_info.get('VERSION_ID')}\n")
             f.write(f"VERSION={version}\n")
+            if has_systemd_units:
+                f.write("EXTENSION_RELOAD_MANAGER=1\n")
+                logging.info("Detected systemd units: added EXTENSION_RELOAD_MANAGER=1 to release metadata.")
 
-        # Manifest generation
+        # 8. Generování manifestů
         manifest_dir = os.path.join(staging_root, "usr/share/sysext/manifests")
         os.makedirs(manifest_dir, exist_ok=True)
 
@@ -394,7 +436,7 @@ def main():
         with open(os.path.join(manifest_dir, f"{name}-deps.txt"), "w") as f:
             f.write("\n".join(sorted(deps_list)) + "\n")
 
-        # Create EROFS Image
+        # 9. Tvorba EROFS obrazu
         out_file = os.path.join(CACHE_DIR, f"{name}.raw")
         tmp_out_file = out_file + ".tmp"
 
