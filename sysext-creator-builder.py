@@ -1,7 +1,6 @@
 #!/usr/bin/python3
-
-# Sysext-Creator Builder v3.1.1
-# Fixes: Automatic /etc migration via tmpfiles.d and Manifest generation for GUI
+# Sysext-Creator Builder v3.2
+# Fedora 45 DNF5 & usr-repo relocation support, fast host RPM indexing, clean /etc manifests
 
 import os
 import subprocess
@@ -11,13 +10,22 @@ import shutil
 import logging
 import re
 import argparse
+import stat
 
-# ==========================================
-# GLOBAL CONFIGURATION
-# ==========================================
 CACHE_DIR = os.path.expanduser("~/.cache/sysext-creator")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+
+def safe_rmtree(path):
+    """Recursively removes a directory handling read-only permissions."""
+    def on_error(func, p, exc_info):
+        try:
+            os.chmod(p, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+            func(p)
+        except Exception:
+            pass
+    if os.path.exists(path):
+        shutil.rmtree(path, onerror=on_error)
 
 def run_cmd(cmd, cwd=None):
     try:
@@ -28,15 +36,17 @@ def run_cmd(cmd, cwd=None):
 
 def get_os_info():
     info = {"ID": "fedora", "VERSION_ID": "any"}
-    try:
-        path = "/run/host/etc/os-release"
-        if os.path.exists(path):
-            with open(path, "r") as f:
-                for line in f:
-                    if "=" in line:
-                        k, v = line.strip().split("=", 1)
-                        info[k] = v.strip('"')
-    except: pass
+    for candidate in ["/run/host/usr/lib/os-release", "/run/host/etc/os-release"]:
+        if os.path.exists(candidate):
+            try:
+                with open(candidate, "r") as f:
+                    for line in f:
+                        if "=" in line:
+                            k, v = line.strip().split("=", 1)
+                            info[k] = v.strip('"\'')
+                break
+            except Exception:
+                pass
     return info
 
 def get_rpm_version(rpm_path):
@@ -44,59 +54,58 @@ def get_rpm_version(rpm_path):
     try:
         res = subprocess.run(["rpm", "-qp", f"--qf={query}", rpm_path], capture_output=True, text=True, check=True)
         return res.stdout.strip()
-    except:
+    except Exception:
         return "unknown"
 
 def calculate_host_dependencies(packages):
-    if not packages: return []
+    if not packages:
+        return []
     logging.info("Calculating missing dependencies against host OS...")
-    cmd = ["flatpak-spawn", "--host", "rpm-ostree", "install", "--dry-run"] + packages
+    cmd = ["flatpak-spawn", "--host", "env", "LC_ALL=C", "rpm-ostree", "install", "--dry-run"] + packages
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
 
-        # Abort immediately if rpm-ostree reports the package is already on the host
         if res.returncode != 0:
             combined_output = res.stderr + "\n" + res.stdout
             if "is already provided by" in combined_output:
-                logging.error("Build aborted: One or more requested packages are already installed on the host OS.")
+                logging.error("Build aborted: One or more requested packages are already installed on host OS.")
                 logging.error(combined_output.strip())
                 sys.exit(1)
             else:
-                logging.warning(f"rpm-ostree dry-run returned an error: {combined_output.strip()}")
+                logging.warning(f"rpm-ostree dry-run returned non-zero code: {combined_output.strip()}")
 
         arch_res = subprocess.run(["uname", "-m"], capture_output=True, text=True, check=True)
         host_arch = arch_res.stdout.strip()
 
         allowed_archs = ["noarch", host_arch]
-        if host_arch == "x86_64": allowed_archs.append("i686")
+        if host_arch == "x86_64":
+            allowed_archs.append("i686")
 
         added_pkgs = []
         parsing_added = False
-
-        # Dynamically build the regex pattern for allowed architectures
         arch_pattern = "|".join(allowed_archs)
         nevra_re = re.compile(fr'^(.+?)-(([0-9]+:)?([^-]+)-([^-]+))\.({arch_pattern})$')
 
-        # Step 1: Parse the output from rpm-ostree dry-run
         for line in res.stdout.splitlines():
-            if any(line.startswith(s) for s in ["Installing ", "Added:", "Upgrading ", "Upgraded:"]):
+            line_s = line.strip()
+            if any(line.startswith(s) for s in ["Installing", "Added:", "Upgrading", "Upgraded:"]):
                 parsing_added = True
                 continue
-            elif any(line.startswith(s) for s in ["Removing ", "Removed:"]):
+            elif any(line.startswith(s) for s in ["Removing", "Removed:"]):
                 parsing_added = False
                 continue
 
             if parsing_added and line.startswith(" "):
-                raw_pkg = line.strip().split()[0]
+                raw_pkg = line_s.split()[0]
                 match = nevra_re.match(raw_pkg)
                 if match:
                     name_pkg, arch = match.group(1), match.group(6)
                     formatted = f"{name_pkg}.{arch}"
-                    if formatted not in added_pkgs: added_pkgs.append(formatted)
+                    if formatted not in added_pkgs:
+                        added_pkgs.append(formatted)
 
-        # Step 2: Filter out packages that are already present in the host RPM database (e.g., layered overlays)
         if added_pkgs:
-            logging.info("Cross-checking with host RPM database to filter out existing overlays...")
+            logging.info("Cross-checking with host RPM database to filter out existing packages...")
             try:
                 rpm_res = subprocess.run(
                     ["rpm", "--root", "/run/host", "-qa", "--qf", "%{NAME}.%{ARCH}\n"],
@@ -109,171 +118,171 @@ def calculate_host_dependencies(packages):
 
                 if ignored_count > 0:
                     logging.info(f"Filtered out {ignored_count} packages already present on the host.")
-
                 added_pkgs = filtered_pkgs
             except Exception as e:
-                logging.warning(f"Failed to query host RPM database for filtering: {e}")
+                logging.warning(f"Failed to query host RPM database: {e}")
 
-        # Final reporting
-        if added_pkgs:
-            logging.info(f"Found {len(added_pkgs)} packages to download (after filtering).")
-        else:
-            logging.info("No additional dependencies needed.")
-
+        logging.info(f"Identified {len(added_pkgs)} packages required for extension.")
         return added_pkgs
     except Exception as e:
         logging.error(f"Dependency calculation failed: {e}")
         sys.exit(1)
 
 def sync_host_repos():
-    """Synchronize repositories and GPG keys from the host to the toolbox."""
+    """Synchronize repositories and GPG keys from host supporting F45+ relocated paths."""
     logging.info("Syncing host repositories and GPG keys...")
-    host_repos = "/run/host/etc/yum.repos.d"
-    host_gpg = "/run/host/etc/pki/rpm-gpg"
+    host_repo_dirs = [
+        "/run/host/usr/share/dnf5/repos.d",
+        "/run/host/etc/yum.repos.d",
+        "/run/host/etc/dnf/repos.d",
+    ]
 
-    if os.path.exists(host_repos):
-        try:
-            subprocess.run(f"sudo cp -f {host_repos}/*.repo /etc/yum.repos.d/", shell=True)
-        except: pass
+    subprocess.run(["sudo", "mkdir", "-p", "/etc/yum.repos.d"], check=False)
+    for rdir in host_repo_dirs:
+        if os.path.isdir(rdir):
+            for f in os.listdir(rdir):
+                if f.endswith(".repo"):
+                    src = os.path.join(rdir, f)
+                    try:
+                        subprocess.run(["sudo", "cp", "-f", src, "/etc/yum.repos.d/"], check=True)
+                    except Exception as e:
+                        logging.warning(f"Could not copy repo file {src}: {e}")
 
-    if os.path.exists(host_gpg):
-        try:
-            subprocess.run(["sudo", "mkdir", "-p", "/etc/pki/rpm-gpg"], check=True)
-            subprocess.run(f"sudo cp -rf {host_gpg}/* /etc/pki/rpm-gpg/", shell=True)
-            # Import keys into the toolbox RPM database
-            for f in os.listdir(host_gpg):
-                key_path = os.path.join("/etc/pki/rpm-gpg", f)
-                if os.path.isfile(key_path) and not f.startswith("."):
-                    subprocess.run(["sudo", "rpm", "--import", key_path], capture_output=True)
-        except: pass
+    host_gpg_dirs = [
+        "/run/host/usr/share/pki/rpm-gpg",
+        "/run/host/etc/pki/rpm-gpg",
+    ]
+
+    subprocess.run(["sudo", "mkdir", "-p", "/etc/pki/rpm-gpg", "/usr/share/pki/rpm-gpg"], check=False)
+    for gdir in host_gpg_dirs:
+        if os.path.isdir(gdir):
+            for f in os.listdir(gdir):
+                src = os.path.join(gdir, f)
+                if os.path.isfile(src) and not f.startswith("."):
+                    try:
+                        subprocess.run(["sudo", "cp", "-f", src, "/etc/pki/rpm-gpg/"], check=False)
+                        subprocess.run(["sudo", "cp", "-f", src, "/usr/share/pki/rpm-gpg/"], check=False)
+                        subprocess.run(["sudo", "rpm", "--import", src], capture_output=True, check=False)
+                    except Exception as e:
+                        logging.warning(f"Could not import GPG key {src}: {e}")
 
 def verify_rpms(rpm_paths, is_local=False):
-    """Verify GPG signatures of RPM packages. Local packages are checked but don't fail the build if unsigned."""
-    if not rpm_paths: return
-
+    """Verify GPG signatures of RPM packages."""
+    if not rpm_paths:
+        return
     label = "local" if is_local else "downloaded"
     logging.info(f"Verifying GPG signatures for {len(rpm_paths)} {label} packages...")
 
     for rpm in rpm_paths:
         try:
-            # rpm -K (or --checksig) verifies the signature
             subprocess.run(["rpm", "-K", rpm], check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             if is_local:
-                logging.warning(f"Warning: Local package signature verification skipped/failed: {os.path.basename(rpm)}")
+                logging.warning(f"Local package signature verification skipped/failed: {os.path.basename(rpm)}")
             else:
-                logging.error(f"Error: GPG Verification FAILED for repo package: {os.path.basename(rpm)}")
+                logging.error(f"GPG Verification FAILED for repo package: {os.path.basename(rpm)}")
                 logging.error(f"Details: {e.stderr}")
                 sys.exit(1)
 
     if not is_local:
-        logging.info("All repository signatures verified successfully.")
+        logging.info("All repository package signatures verified.")
 
 def check_container_dependencies():
-    """Ensure erofs-utils and dnf-plugins-core are installed in the toolbox."""
-    logging.info("Checking container dependencies...")
-
+    """Ensure mkfs.erofs and dnf download functionality exist."""
+    logging.info("Checking container build tools...")
     missing = []
-    # Check mkfs.erofs (erofs-utils)
     if shutil.which("mkfs.erofs") is None:
         missing.append("erofs-utils")
 
-    # Check dnf download (dnf-plugins-core)
     try:
         subprocess.run(["dnf", "download", "--help"], capture_output=True, check=True)
-    except:
-        missing.append("dnf-plugins-core")
+    except Exception:
+        missing.append("dnf5-plugins" if shutil.which("dnf5") else "dnf-plugins-core")
 
     if missing:
-        logging.warning(f"Missing dependencies in container: {', '.join(missing)}")
-        logging.info("Attempting to install missing dependencies...")
+        logging.info(f"Installing missing container dependencies: {', '.join(missing)}")
         try:
-            # Use sudo because toolbox usually requires it for dnf install
             subprocess.run(["sudo", "LANG=C", "dnf", "install", "-y"] + missing, check=True)
-            logging.info("Dependencies installed successfully.")
         except Exception as e:
             logging.error(f"Failed to install dependencies: {e}")
             sys.exit(1)
-    else:
-        logging.info("All container dependencies are present.")
 
 def prune_shadowed_files(staging_root):
-    """
-    Remove files from staging that are owned by host RPM packages.
-    This prevents shadowing core system files while allowing updates
-    of files provided by currently active sysexts (which are not in RPM DB).
-    """
-    logging.info("Fetching list of all files owned by host RPMs (this may take a moment)...")
+    """Prunes files already present on the host OS from /usr and /opt."""
+    logging.info("Indexing host RPM files via host root...")
     try:
-        # Get all files owned by all installed packages on the host
-        res = subprocess.run(["flatpak-spawn", "--host", "rpm", "-ql", "--all"],
-                             capture_output=True, text=True, errors="replace")
-        if res.returncode != 0:
-            logging.warning("Failed to get host RPM file list. Skipping smart pruning.")
-            return
-
-        # Create a set of host-owned files for O(1) lookup
+        res = subprocess.run(
+            ["rpm", "--root", "/run/host", "-ql", "-a"],
+            capture_output=True, text=True, errors="replace", check=True
+        )
         host_owned_files = set(res.stdout.splitlines())
-        logging.info(f"Indexed {len(host_owned_files)} system-owned files.")
+        logging.info(f"Indexed {len(host_owned_files)} host-owned files.")
     except Exception as e:
         logging.warning(f"Error during host RPM indexing: {e}. Skipping smart pruning.")
         return
 
     pruned_count = 0
-    usr_staging = os.path.join(staging_root, "usr")
-    if not os.path.exists(usr_staging):
-        return
+    for target_dir in ["usr", "opt"]:
+        staging_target = os.path.join(staging_root, target_dir)
+        if not os.path.exists(staging_target):
+            continue
 
-    for root, dirs, files in os.walk(usr_staging):
-        for f in files:
-            full_path = os.path.join(root, f)
-            rel_path = os.path.relpath(full_path, staging_root)
-            # Ensure path starts with / for matching
-            abs_rel_path = "/" + rel_path
+        for root, dirs, files in os.walk(staging_target, topdown=False):
+            for f in files:
+                full_path = os.path.join(root, f)
+                rel_path = os.path.relpath(full_path, staging_root)
+                abs_rel_path = "/" + rel_path
 
-            # CRITICAL: Only prune if the file is explicitly owned by a host RPM
-            if abs_rel_path in host_owned_files:
-                try:
-                    os.remove(full_path)
-                    pruned_count += 1
-                    logging.debug(f"Pruned shadowed system file: {abs_rel_path}")
-                except Exception as e:
-                    logging.warning(f"Failed to prune {abs_rel_path}: {e}")
+                if abs_rel_path in host_owned_files:
+                    try:
+                        os.remove(full_path)
+                        pruned_count += 1
+                    except Exception as e:
+                        logging.warning(f"Failed to prune {abs_rel_path}: {e}")
 
-    if pruned_count > 0:
-        logging.info(f"Smart Pruning: Removed {pruned_count} files owned by the host OS.")
-        # Cleanup empty directories
-        for root, dirs, files in os.walk(usr_staging, topdown=False):
-            for d in dirs:
+            for d in list(dirs):
                 dir_path = os.path.join(root, d)
-                if not os.listdir(dir_path):
+                if os.path.islink(dir_path):
+                    rel_path = os.path.relpath(dir_path, staging_root)
+                    abs_rel_path = "/" + rel_path
+                    if abs_rel_path in host_owned_files:
+                        try:
+                            os.remove(dir_path)
+                            pruned_count += 1
+                        except Exception:
+                            pass
+                elif not os.listdir(dir_path):
                     try:
                         os.rmdir(dir_path)
-                    except: pass
+                    except Exception:
+                        pass
+
+    if pruned_count > 0:
+        logging.info(f"Smart Pruning: Removed {pruned_count} files owned by host OS.")
     else:
         logging.info("No host OS shadowing detected.")
 
 def main():
-    # Setup professional argument parsing
     parser = argparse.ArgumentParser(description="Sysext-Creator EROFS Builder")
     parser.add_argument("--name", required=True, help="Name of the resulting system extension")
-    parser.add_argument("--packages", nargs='+', required=True, help="List of packages to include in the extension")
+    parser.add_argument("--packages", nargs='+', required=True, help="List of packages to include")
 
     args = parser.parse_args()
-
     name = args.name
     requested_packages = args.packages
 
     check_container_dependencies()
     sync_host_repos()
 
-    os.makedirs(CACHE_DIR, exist_ok=True) # <-- Added safety check here
+    os.makedirs(CACHE_DIR, exist_ok=True)
 
     build_dir = tempfile.mkdtemp(prefix=f"sysext-build-{name}-")
-    staging_root = build_dir
+    staging_root = os.path.join(build_dir, "rootfs")
+    dnf_dir = os.path.join(build_dir, "dnf-downloads")
 
     try:
         os.makedirs(staging_root, exist_ok=True)
+        os.makedirs(dnf_dir, exist_ok=True)
 
         local_rpms = [p for p in requested_packages if p.endswith(".rpm") and os.path.isfile(p)]
         repo_packages = [p for p in requested_packages if p not in local_rpms]
@@ -283,13 +292,10 @@ def main():
             verify_rpms(local_rpms, is_local=True)
 
         missing_deps = calculate_host_dependencies(all_pkgs)
-        dnf_dir = os.path.join(build_dir, "dnf-downloads")
-        os.makedirs(dnf_dir, exist_ok=True)
 
         if missing_deps:
             logging.info(f"Downloading {len(missing_deps)} packages to {dnf_dir}...")
-            run_cmd(["dnf", "--refresh", "download", "-y", f"--destdir={dnf_dir}"] + missing_deps)
-            # Verify GPG signatures of downloaded packages
+            run_cmd(["dnf", "--refresh", "download", f"--destdir={dnf_dir}"] + missing_deps)
             downloaded_rpms = [os.path.join(dnf_dir, f) for f in os.listdir(dnf_dir) if f.endswith(".rpm")]
             verify_rpms(downloaded_rpms, is_local=False)
 
@@ -305,49 +311,52 @@ def main():
 
         logging.info(f"Detected version: {version}")
 
+        # Extract RPMs into staging rootfs
         for rpm in rpms_to_extract:
             ps = subprocess.Popen(["rpm2cpio", rpm], stdout=subprocess.PIPE)
             subprocess.run(["cpio", "-idmv"], stdin=ps.stdout, cwd=staging_root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             ps.wait()
 
-        # --- SMART PRUNING ---
+        # Prune /var since systemd-sysext does not merge it
+        var_src = os.path.join(staging_root, "var")
+        if os.path.exists(var_src):
+            logging.warning("Discarding payload in /var (/var is not supported by systemd-sysext).")
+            safe_rmtree(var_src)
+
+        # Smart Pruning against host RPMs
         prune_shadowed_files(staging_root)
 
-        # --- /ETC PROCESSING ---
+        # /etc migration to tmpfiles.d
         etc_src = os.path.join(staging_root, "etc")
+        migrated_etc_files = []
+
         if os.path.exists(etc_src):
-            logging.info(f"Found /etc content in {name}. Migrating to tmpfiles.d...")
+            logging.info(f"Migrating /etc payload to tmpfiles.d for {name}...")
             etc_template_dir = f"usr/lib/sysext-creator/etc-template/{name}"
             full_template_path = os.path.join(staging_root, etc_template_dir)
             os.makedirs(full_template_path, exist_ok=True)
 
             tmpfiles_content = []
-            # Iterate through all files in /etc
             for root, dirs, files in os.walk(etc_src):
                 for f in files:
                     full_f_path = os.path.join(root, f)
                     rel_f_path = os.path.relpath(full_f_path, etc_src)
-
-                    # Path within sysext (where we move the file)
                     target_in_usr = os.path.join(full_template_path, rel_f_path)
                     os.makedirs(os.path.dirname(target_in_usr), exist_ok=True)
                     shutil.move(full_f_path, target_in_usr)
 
-                    # Add line to tmpfiles.d (L+ creates a symlink and overwrites existing)
-                    # Format: L+ /etc/path - - - - /usr/lib/sysext-creator/etc-template/name/path
                     tmpfiles_content.append(f"L+ /etc/{rel_f_path} - - - - /{etc_template_dir}/{rel_f_path}")
+                    migrated_etc_files.append(rel_f_path)
 
-            # Delete empty /etc in staging root
-            shutil.rmtree(etc_src)
+            safe_rmtree(etc_src)
 
-            # Write tmpfiles.d configuration
             tmp_dir = os.path.join(staging_root, "usr/lib/tmpfiles.d")
             os.makedirs(tmp_dir, exist_ok=True)
             with open(os.path.join(tmp_dir, f"sysext-creator-{name}.conf"), "w") as f:
                 f.write("# Generated by Sysext-Creator\n")
                 f.write("\n".join(tmpfiles_content) + "\n")
-        # --- END OF /ETC PROCESSING ---
 
+        # extension-release definition
         os_info = get_os_info()
         rel_dir = os.path.join(staging_root, "usr/lib/extension-release.d")
         os.makedirs(rel_dir, exist_ok=True)
@@ -356,45 +365,36 @@ def main():
             f.write(f"VERSION_ID={os_info.get('VERSION_ID')}\n")
             f.write(f"VERSION={version}\n")
 
-        # --- METADATA & MANIFESTS ---
+        # Manifest generation
         manifest_dir = os.path.join(staging_root, "usr/share/sysext/manifests")
         os.makedirs(manifest_dir, exist_ok=True)
 
-        # 1. Base requested packages
         with open(os.path.join(manifest_dir, f"{name}.txt"), "w") as f:
             f.write("\n".join(requested_packages) + "\n")
 
-        # 2. Base version info
         with open(os.path.join(manifest_dir, f"{name}.version"), "w") as f:
             f.write(version + "\n")
 
-        # 3. Full dependency list with versions (<name>.<version>)
-        logging.info("Extracting version info for full dependency list...")
+        if migrated_etc_files:
+            with open(os.path.join(manifest_dir, f"{name}-etc.txt"), "w") as f:
+                f.write("\n".join(migrated_etc_files) + "\n")
+
         deps_list = []
         for rpm in rpms_to_extract:
             try:
-                # Queries the RPM file for Name.Version format
                 res = subprocess.run(
                     ["rpm", "-qp", "--qf", "%{NAME}.%{VERSION}", rpm],
                     capture_output=True, text=True, check=True
                 )
                 if res.stdout.strip():
                     deps_list.append(res.stdout.strip())
-            except Exception as e:
-                logging.warning(f"Failed to extract info from {os.path.basename(rpm)}: {e}")
+            except Exception:
+                pass
 
-        # Named specifically to avoid conflicts when merged into /usr
         with open(os.path.join(manifest_dir, f"{name}-deps.txt"), "w") as f:
             f.write("\n".join(sorted(deps_list)) + "\n")
 
-        # --- CLEANUP ---
-        # Remove the downloaded RPMs so they don't bloat the final .raw image
-        if os.path.exists(dnf_dir):
-            shutil.rmtree(dnf_dir)
-            logging.info("Cleaned up temporary DNF downloads.")
-
-
-        # --- EROFS IMAGE CREATION ---
+        # Create EROFS Image
         out_file = os.path.join(CACHE_DIR, f"{name}.raw")
         tmp_out_file = out_file + ".tmp"
 
@@ -405,13 +405,11 @@ def main():
         cmd.extend([tmp_out_file, staging_root])
         run_cmd(cmd)
 
-        # Atomic rename
         os.rename(tmp_out_file, out_file)
         logging.info(f"Build finished successfully: {out_file}")
 
     finally:
-        if os.path.exists(build_dir):
-            shutil.rmtree(build_dir)
+        safe_rmtree(build_dir)
 
 if __name__ == "__main__":
     main()
