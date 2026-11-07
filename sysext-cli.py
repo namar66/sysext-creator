@@ -1,13 +1,14 @@
 #!/usr/bin/python3
 # Sysext Creator CLI v3.2
+# Safe deployment, SELinux policy installation & removal, desktop menu refresh
 # Safe input escaping, clean /etc symlink cleanup on removal, update command
-
 import os
 import sys
 import re
 import argparse
 import subprocess
 import shlex
+import shutil
 
 CACHE_DIR = os.path.expanduser("~/.cache/sysext-creator")
 EXTENSIONS_DIR = "/var/lib/extensions"
@@ -35,6 +36,25 @@ def run_pkexec_cmd(cmd_string, action_name):
     except Exception as e:
         print(f"❌ Execution error: {e}")
         sys.exit(1)
+
+def refresh_desktop_environment():
+    """Notifies KDE Plasma and GNOME to reload .desktop entries after overlay changes."""
+    # 1. KDE Plasma (kbuildsycoca6 nebo kbuildsycoca5)
+    for ksycoca in ["kbuildsycoca6", "kbuildsycoca5"]:
+        if shutil.which(ksycoca):
+            subprocess.run([ksycoca], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            break
+
+    # 2. GNOME / XDG: Touch složky aplikací probudí GFileMonitor
+    user_apps = os.path.expanduser("~/.local/share/applications")
+    if os.path.exists(user_apps):
+        try:
+            os.utime(user_apps, None)
+        except Exception:
+            pass
+
+    if shutil.which("update-desktop-database"):
+        subprocess.run(["update-desktop-database", user_apps], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def get_human_size(path):
     try:
@@ -86,13 +106,14 @@ def cmd_list(args):
         print(f"{name:<22} | {version:<12} | {count:<10} | {size_str:<10} | Active")
 
 def cmd_remove(args):
-    """Removes an extension and purges its /etc symlinks cleanly."""
+    """Removes an extension, its SELinux policies, and /etc symlinks cleanly."""
     name = args.name
     validate_name(name)
 
     raw_path = os.path.join(EXTENSIONS_DIR, f"{name}.raw")
     cache_path = os.path.join(CACHE_DIR, f"{name}.raw")
     etc_manifest = os.path.join(MANIFEST_DIR, f"{name}-etc.txt")
+    selinux_manifest = os.path.join(MANIFEST_DIR, f"{name}-selinux.txt")
 
     if not os.path.exists(raw_path):
         print(f"❌ Extension '{name}' is not currently active.")
@@ -100,21 +121,34 @@ def cmd_remove(args):
 
     print(f"🗑️  Removing extension '{name}'...")
 
-    # Read /etc symlinks while layer is still mounted
-    etc_links_to_remove = []
-    if os.path.exists(etc_manifest):
+    cleanup_cmds = []
+
+    # 1. Odinstalace SELinux modulů z hostitelského jádra (pokud existují)
+    if os.path.exists(selinux_manifest):
         try:
-            with open(etc_manifest, 'r') as f:
-                etc_links_to_remove = [line.strip() for line in f if line.strip()]
+            with open(selinux_manifest, 'r') as f:
+                for line in f:
+                    mod_path = line.strip()
+                    if mod_path:
+                        # Získáme název modulu bez přípony (.pp.bz2, .pp, .cil)
+                        base_mod = os.path.basename(mod_path).split(".")[0]
+                        cleanup_cmds.append(f"semodule -r {shlex.quote(base_mod)} 2>/dev/null || true")
         except Exception:
             pass
 
-    # Build clean shell removal script
-    cleanup_cmds = []
-    for rel_f in etc_links_to_remove:
-        full_etc_link = os.path.join("/etc", rel_f)
-        cleanup_cmds.append(f"[ -L {shlex.quote(full_etc_link)} ] && rm -f {shlex.quote(full_etc_link)}")
+    # 2. Odstranění /etc symlinků
+    if os.path.exists(etc_manifest):
+        try:
+            with open(etc_manifest, 'r') as f:
+                for line in f:
+                    rel_f = line.strip()
+                    if rel_f:
+                        full_etc_link = os.path.join("/etc", rel_f)
+                        cleanup_cmds.append(f"[ -L {shlex.quote(full_etc_link)} ] && rm -f {shlex.quote(full_etc_link)}")
+        except Exception:
+            pass
 
+    # 3. Odstranění souborů vrstvy a refresh
     cleanup_cmds.append(f"rm -f {shlex.quote(raw_path)} {shlex.quote(cache_path)}")
     cleanup_cmds.append("systemd-sysext refresh")
     cleanup_cmds.append("systemd-tmpfiles --create")
@@ -122,6 +156,7 @@ def cmd_remove(args):
     full_shell_cmd = " && ".join(cleanup_cmds)
 
     if run_pkexec_cmd(full_shell_cmd, f"remove {name}"):
+        refresh_desktop_environment()
         print(f"✅ Extension '{name}' successfully removed and cleaned up.")
 
 def cmd_doctor(args):
@@ -150,7 +185,7 @@ def cmd_install(args):
         print(f"❌ Builder script not found at {builder_script}")
         sys.exit(1)
 
-    # Phase 1: Build in Toolbox
+    # Fáze 1: Build v Toolboxu
     build_cmd = [
         "toolbox", "run", "-c", "sysext-builder",
         "python3", builder_script,
@@ -164,7 +199,7 @@ def cmd_install(args):
         print("\n❌ Build phase failed.")
         sys.exit(1)
 
-    # Phase 2: Deploy to Root space
+    # Fáze 2: Deploy do systému
     source_raw = os.path.join(CACHE_DIR, f"{name}.raw")
     dest_raw = os.path.join(EXTENSIONS_DIR, f"{name}.raw")
 
@@ -173,14 +208,33 @@ def cmd_install(args):
         sys.exit(1)
 
     print(f"\n📦 Deploying '{name}' to system...")
-    shell_cmd = (
-        f"mkdir -p {shlex.quote(EXTENSIONS_DIR)} && "
-        f"mv -f {shlex.quote(source_raw)} {shlex.quote(dest_raw)} && "
-        f"systemd-sysext refresh && "
-        f"systemd-tmpfiles --create"
-    )
 
-    if run_pkexec_cmd(shell_cmd, f"deploy {name}"):
+    # Zjistíme, zda vrstva nese SELinux politiku uvnitř svého rootfs v toolboxu
+    # Po refreshi si přečteme manifest ze systému
+    deploy_cmds = [
+        f"mkdir -p {shlex.quote(EXTENSIONS_DIR)}",
+        f"mv -f {shlex.quote(source_raw)} {shlex.quote(dest_raw)}",
+        "systemd-sysext refresh",
+        "systemd-tmpfiles --create"
+    ]
+
+    # Skript po refreshi prověří přítomnost manifestu a zavede politiku do jádra
+    selinux_loader = f"""
+    if [ -f {shlex.quote(MANIFEST_DIR)}/{shlex.quote(name)}-selinux.txt ]; then
+        echo "🛡️ Installing SELinux policy modules to host kernel..."
+        while IFS= read -r mod; do
+            if [ -f "/$mod" ]; then
+                semodule -i "/$mod" || true
+            fi
+        done < {shlex.quote(MANIFEST_DIR)}/{shlex.quote(name)}-selinux.txt
+    fi
+    """
+    deploy_cmds.append(selinux_loader.strip())
+
+    full_shell_cmd = " && ".join(deploy_cmds)
+
+    if run_pkexec_cmd(full_shell_cmd, f"deploy {name}"):
+        refresh_desktop_environment()
         print(f"✅ Extension '{name}' successfully built and activated.")
 
 def cmd_update(args):
