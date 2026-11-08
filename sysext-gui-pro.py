@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Sysext Creator GUI Pro v3.2
+# Sysext Creator GUI Pro v3.2.4
 # Unified architecture delegating all backend operations to sysext-cli.py
 
 import sys
