@@ -89,10 +89,10 @@ StartupNotify=true" > "$DESKTOP_PATH/sysext-creator.desktop"
     
     # The magical meta-step: building PyQt6 dependencies using our own CLI
     log "Building the 'pyqt6-deps' system extension using sysext-cli..."
-    echo "This will download python3-pyqt6 and qt6-qtwayland to ensure the GUI works."
+    echo "This will download python3-pyqt6 to ensure the GUI works."
     
     # We call the CLI directly from where we just installed it
-    "$BIN_PATH/sysext-cli" install pyqt6-deps python3-pyqt6
+    "$BIN_PATH/sysext-cli" install python3-pyqt6
 else
     log "Skipping GUI installation."
 fi
