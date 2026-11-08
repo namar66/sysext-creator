@@ -1,9 +1,10 @@
 #!/usr/bin/python3
-# Sysext-Creator Builder v3.2
-# Smart /etc vendor relocation, SELinux policy compilation (-n), systemd auto-reload
+# Sysext-Creator Builder v3.2.4
+# Smart /etc vendor relocation, SELinux compilation, trigger detection & RPM scriptlet inspection
 # Phase 1: Smart vendor relocation for /etc -> /usr, minimal tmpfiles.d fallback
 # bin/sbin merge, opt-relocation, systemd unit auto-reload
 # Fedora 45 DNF5 & usr-repo relocation support, fast host RPM indexing, clean /etc manifests
+
 import os
 import subprocess
 import sys
@@ -71,6 +72,31 @@ def get_rpm_version(rpm_path):
         return res.stdout.strip()
     except Exception:
         return "unknown"
+
+def inspect_rpm_scripts(rpm_paths):
+    """Scans RPM scriptlets for unhandled imperative operations."""
+    warnings_found = 0
+    patterns = [
+        (re.compile(r'\buseradd\b'), "Creates users imperatively (handled via sysusers.d if available)"),
+        (re.compile(r'\bgroupadd\b'), "Creates groups imperatively (handled via sysusers.d if available)"),
+        (re.compile(r'\bcrontab\b'), "Modifies crontab directly"),
+        (re.compile(r'/etc/rc\.d'), "Uses legacy SysV init paths"),
+    ]
+
+    for rpm in rpm_paths:
+        try:
+            res = subprocess.run(["rpm", "-qp", "--scripts", rpm], capture_output=True, text=True, check=True)
+            if not res.stdout.strip():
+                continue
+            for pattern, desc in patterns:
+                if pattern.search(res.stdout):
+                    logging.warning(f"Scriptlet notice [{os.path.basename(rpm)}]: {desc}")
+                    warnings_found += 1
+        except Exception:
+            pass
+
+    if warnings_found == 0:
+        logging.info("RPM scriptlets inspection: clean / declarative.")
 
 def calculate_host_dependencies(packages):
     if not packages:
@@ -284,6 +310,39 @@ def clean_empty_directories(path):
                 except Exception:
                     pass
 
+def detect_and_save_triggers(staging_root, manifest_dir, name):
+    """Detects required system cache/daemon triggers and writes manifest."""
+    triggers = []
+
+    # 1. System users & groups
+    if os.path.exists(os.path.join(staging_root, "usr/lib/sysusers.d")):
+        triggers.append("sysusers")
+
+    # 2. GSettings schemas
+    if os.path.exists(os.path.join(staging_root, "usr/share/glib-2.0/schemas")):
+        triggers.append("glib-schemas")
+
+    # 3. MIME database
+    if os.path.exists(os.path.join(staging_root, "usr/share/mime/packages")):
+        triggers.append("mime")
+
+    # 4. Icon caches
+    icons_dir = os.path.join(staging_root, "usr/share/icons")
+    if os.path.exists(icons_dir):
+        for theme in os.listdir(icons_dir):
+            if os.path.isdir(os.path.join(icons_dir, theme)) and theme != "hicolor":
+                triggers.append(f"icon-cache:{theme}")
+        triggers.append("icon-cache:hicolor")
+
+    # 5. Udev HWDB
+    if os.path.exists(os.path.join(staging_root, "usr/lib/udev/hwdb.d")):
+        triggers.append("hwdb")
+
+    if triggers:
+        logging.info(f"Detected post-deployment triggers: {', '.join(triggers)}")
+        with open(os.path.join(manifest_dir, f"{name}-triggers.txt"), "w") as f:
+            f.write("\n".join(triggers) + "\n")
+
 def main():
     parser = argparse.ArgumentParser(description="Sysext-Creator EROFS Builder")
     parser.add_argument("--name", required=True, help="Name of the resulting system extension")
@@ -323,6 +382,9 @@ def main():
 
         rpms_to_extract = local_rpms + [os.path.join(dnf_dir, f) for f in os.listdir(dnf_dir) if f.endswith(".rpm")]
 
+        # Inspekce RPM skriptletů
+        inspect_rpm_scripts(rpms_to_extract)
+
         version = "unknown"
         for rpm in rpms_to_extract:
             if os.path.basename(rpm).startswith(name + "-"):
@@ -333,7 +395,7 @@ def main():
 
         logging.info(f"Detected version: {version}")
 
-        # Extract RPMs
+        # Rozbalení RPM archivů
         for rpm in rpms_to_extract:
             ps = subprocess.Popen(["rpm2cpio", rpm], stdout=subprocess.PIPE)
             subprocess.run(["cpio", "-idmv"], stdin=ps.stdout, cwd=staging_root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -426,10 +488,10 @@ def main():
         elif os.path.exists(etc_src):
             safe_rmtree(etc_src)
 
-        # 6. Smart Pruning
+        # 6. Smart Pruning vůči hostitelské RPM databázi
         prune_shadowed_files(staging_root)
 
-        # 7. SELINUX PROCESSING
+        # 7. SELinux zpracování
         selinux_modules = []
         selinux_dirs = [
             os.path.join(staging_root, "usr/share/selinux/packages"),
@@ -446,7 +508,6 @@ def main():
         if selinux_modules:
             logging.info(f"Detected {len(selinux_modules)} SELinux policy module(s). Compiling in container...")
             try:
-                # semodule -n compilyje do policy store bez zasahování do běžícího jádra
                 cmd_se = ["sudo", "semodule", "-n", "-i"] + selinux_modules
                 subprocess.run(cmd_se, check=True, capture_output=True)
 
@@ -466,7 +527,7 @@ def main():
                     has_systemd_units = True
                     break
 
-        # 9. extension-release konfigurace
+        # 9. extension-release metadata
         os_info = get_os_info()
         rel_dir = os.path.join(staging_root, "usr/lib/extension-release.d")
         os.makedirs(rel_dir, exist_ok=True)
@@ -478,7 +539,7 @@ def main():
                 f.write("EXTENSION_RELOAD_MANAGER=1\n")
                 logging.info("Detected systemd units: added EXTENSION_RELOAD_MANAGER=1 to release metadata.")
 
-        # 10. Generování manifestů
+        # 10. Generování manifestů a triggerů
         manifest_dir = os.path.join(staging_root, "usr/share/sysext/manifests")
         os.makedirs(manifest_dir, exist_ok=True)
 
@@ -493,10 +554,12 @@ def main():
                 f.write("\n".join(migrated_etc_files) + "\n")
 
         if selinux_modules:
-            # Ukládáme relativní cestu modulu vůči /usr
             rel_modules = [os.path.relpath(m, staging_root) for m in selinux_modules]
             with open(os.path.join(manifest_dir, f"{name}-selinux.txt"), "w") as f:
                 f.write("\n".join(rel_modules) + "\n")
+
+        # Detekce a zápis systémových triggerů
+        detect_and_save_triggers(staging_root, manifest_dir, name)
 
         deps_list = []
         for rpm in rpms_to_extract:
