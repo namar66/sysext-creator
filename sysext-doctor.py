@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-# Sysext Doctor v3.2
+# Sysext Doctor v3.2.4
 # System diagnostics for systemd-sysext, F45 repo layouts, and orphan /etc symlinks
 
 import os
