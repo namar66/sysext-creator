@@ -194,7 +194,12 @@ def cmd_install(args):
     """Builds and deploys a new extension."""
     name = args.name
     validate_name(name)
-    packages = args.packages
+    raw_packages = args.packages or [name]
+
+    packages = [
+        os.path.abspath(p) if p.endswith(".rpm") and os.path.exists(p) else p
+        for p in raw_packages
+    ]
 
     if not packages:
         packages = [name]
