@@ -580,7 +580,7 @@ def main():
         out_file = os.path.join(CACHE_DIR, f"{name}.raw")
         tmp_out_file = out_file + ".tmp"
 
-        cmd = ["mkfs.erofs", "-x1", "--all-root", "-U", "clear", "-T", "0"]
+        cmd = ["mkfs.erofs", "-x1", "-zlz4", "--all-root", "-U", "clear", "-T", "0"]
         if os.path.exists(active_file_contexts):
             cmd.append(f"--file-contexts={active_file_contexts}")
         cmd.extend([tmp_out_file, staging_root])
