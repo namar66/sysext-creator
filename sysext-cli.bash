@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Bash completion for sysext-cli v3.2
+# Bash completion for sysext-cli v3.2.4
 # Supports subcommands (list, remove, doctor, install, update), active layer discovery, and flags
 
 _sysext_cli_completions() {
