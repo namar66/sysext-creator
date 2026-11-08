@@ -4,74 +4,106 @@
 ![Platform](https://img.shields.io/badge/platform-Fedora_Atomic-3870b2.svg)
 ![Experience](https://img.shields.io/badge/user-Linux__admin-black?logo=linux)
 
-# 🚀 Sysext Creator Pro
+# sysext-creator
 
-The Ultimate GUI/CLI Suite for Managing **`systemd-sysext`** and Layered Packages on **Atomic Fedora** (Kinoite/Silverblue/Sericea).
+`sysext-creator` is a tool for building, deploying, and managing `systemd-sysext` images on Fedora Atomic desktops (Silverblue, Kinoite).
 
-`sysext-creator-pro` provides a safe, seamless, and user-friendly experience for adding layered applications to immutable Fedora systems without compromising the core OS integrity or requiring a full ostree commit. It manages everything from downloading DNF packages to creating highly-compressed EROFS images, handling activation, updates, and removals with an enterprise-grade focus on security and best practices.
+It packages applications and their missing dependencies into compressed EROFS images that layer directly over `/usr` without modifying the underlying ostree deployment.
 
-* note: Make sure your system is fully up to date.
-## 🌟 Key Features
+## Features
 
-### 🖥️ GUI (Graphical User Interface)
-* **Real-time DNF Search:** Blazing fast search and filtering of >60,000 packages directly from the Fedora repos.
-* **Transaction Queue:** Add packages to a "shopping cart" before building the final image.
-* **Extension Management:** View installed/cached system extensions, their status (Active/Inactive), and detailed package lists (Requested vs. Full Dependencies).
-* **Smart Doctor:** Run deep, privileged (polkit) diagnostics to identify `/etc` symlink status, OS overwrites, or cross-extension collisions.
-* **System Integration:** Installs to your local `~/.local` directory for full persistence and integration with the application menu (tested on KDE).
+- **CLI-First Architecture**: `sysext-cli` handles building, deployment, updates, and removal; the Qt6 GUI (`sysext-gui-pro`) acts as an optional frontend.
+- **Isolated Builds**: Downloads and unpacks RPMs inside an unprivileged Toolbox container (`sysext-builder`).
+- **Host Dependency Resolution**: Uses `rpm-ostree install --dry-run` against the host system to identify and download only missing dependencies.
+- **Smart Pruning**: Removes files from the build tree that already exist in the host's RPM database to prevent shadowing core system libraries.
+- **Vendor Configuration Relocation**: Automatically moves standard vendor configurations (`/etc/udev/rules.d`, `/etc/sysctl.d`, `/etc/pam.d`, etc.) to `/usr/lib/` or `/usr/share/`.
+- **Stateful `/etc` Handling**: Converts residual `/etc` application configurations into `tmpfiles.d` symlinks and tracks them for clean removal without leaving orphaned links.
+- **SELinux Lifecycle**: Compiles package policies inside the container with `semodule -n`, applies file contexts to the EROFS filesystem, and loads/unloads modules into the host kernel upon layer deployment/removal.
+- **Declarative System Triggers**: Automatically executes post-deployment tasks (`systemd-sysusers`, `glib-compile-schemas`, `update-mime-database`, `gtk-update-icon-cache`, `systemd-hwdb`).
+- **Desktop Integration**: Automatically notifies KDE Plasma (`kbuildsycoca6`) and GNOME (`update-desktop-database`) to refresh application menus after layer state changes.
+- **EROFS Compression**: Compresses images using `mkfs.erofs -zlz4`.
 
-### 🛠️ CLI Builder (under the hood)
-* **Atomic Operation:** Builds in a clean, throwaway Toolbox container without polluting your host.
-* **Smart Pruning:** Automatically prunes shadowed files already present on the host OS to reduce image size (saves ~10% disk space).
-* **Dependency Tracking:** Generates detailed `manifest.txt`, `version.txt`, and full dependency trees (`deps.txt`) for auditability.
-* **EROFS Compression:** Uses highly efficient `mkfs.erofs` for smaller, faster images.
+## Architecture
 
-## 🏗️ Architecture
+The project consists of four primary components:
 
-The suite is built with a strong focus on security and the XDG Base Directory Specification:
+1. **`sysext-cli.py` (`sysext-cli`)**: Unified backend and CLI interface. Dispatches containerized builds, requests Polkit privileges for deployment (`/var/lib/extensions`), manages manifests, and cleans up `/etc` symlinks and SELinux policies upon removal.
+2. **`sysext-creator-builder.py`**: Runs inside the `sysext-builder` Toolbox container. Handles DNF downloads, RPM extraction via `rpm2cpio`, file pruning, vendor relocation, SELinux context labeling, and EROFS image generation.
+3. **`sysext-doctor.py`**: Diagnostic utility that checks extension validity, OS version matching (`extension-release`), Fedora 45+ repo paths, and orphaned symlinks in `/etc`.
+4. **`sysext-gui-pro.py`**: PyQt6 graphical interface providing repository package search, queue management, and visual status reporting by calling `sysext-cli`.
 
-1.  **GUI (`sysext-gui-pro`):** A standard Qt6 application. It communicates with the system via `pkexec` only when administrative actions (deployment, removal, diagnostics) are required.
-2.  **Builder (`sysext-creator-builder.py`):** Operates entirely within a Toolbox container. It fetches packages, unpacks RPMs, prunes duplicates, and creates the EROFS raw image into your local cache directory.
-3.  **Local XDG Compliance:**
-    * **Cache:** Built `.raw` images are temporarily stored in `~/.cache/sysext-creator`.
-    * **Executables & Desktop:** Installed locally to `~/.local/bin` and `~/.local/share/applications`.
+## Prerequisites
 
-## 📦 Prerequisites
+- Fedora Atomic Desktop (Kinoite, Silverblue, etc.)
+- `toolbox`
+- `python3`
+- `erofs-utils` (installed in the toolbox container)
+- `python3-pyqt6` (optional, for the GUI)
 
-* Fedora Atomic (Kinoite, Silverblue, etc.) must be fully up to date.
-* Toolbox installed.
-* Polkit (`pkexec`) capability.
-* PyQt6, `erofs-utils`, and `systemd-dissect` on the host.
+## Installation
 
-## 🚀 Installation
-
-Ensure you have your icon named `sysext-creator-icon.png` in the source directory.
+Run `install.sh` to install all scripts, desktop files, and bash completion to your user environment (`~/.local`):
 
 ```bash
-# 1. Clone the repository
 git clone https://github.com/namar66/sysext-creator.git
 cd sysext-creator
-
-# 2. Grant execution permissions to the scripts and the installer
-chmod +x sysext-gui-pro.py sysext-creator-builder.py sysext-doctor.py install.sh
-
-# 3. Run the installer
+chmod +x install.sh
 ./install.sh
 ```
 
-A new "Sysext Creator Pro" entry will appear in your application menu.
+Ensure `~/.local/bin` is present in your `$PATH`.
 
-## 📜 Uninstallation
+## Usage
 
-We are XDG compliant and leave your core system untouched. To remove the local user installation:
+### Command Line (`sysext-cli`)
 
+**Build and deploy an extension:**
 ```bash
-rm -f ~/.local/bin/{sysext-gui-pro,sysext-creator-builder.py,sysext-doctor.py}
-rm -f ~/.local/share/applications/sysext-creator.desktop
-rm -f ~/.local/share/icons/hicolor/128x128/apps/sysext-creator.png
-rm -rf ~/.cache/sysext-creator
+sysext-cli install krusader
+# or specify multiple packages into a named layer:
+sysext-cli install dev-tools git-lfs jq ripgrep
 ```
 
----
+**List active extensions:**
+```bash
+sysext-cli list
+```
 
-*This project is built by developers who understand that an immutable OS shouldn't mean a locked-down experience. Manage your layers responsibly.*
+**Update installed extensions:**
+```bash
+# Update a specific extension
+sysext-cli update krusader
+
+# Update all active extensions
+sysext-cli update --all
+```
+
+**Remove an extension:**
+```bash
+sysext-cli remove krusader
+```
+
+**Run system diagnostics:**
+```bash
+sysext-cli doctor
+```
+
+### Graphical Interface
+
+Launch **Sysext Creator** from your desktop application launcher or run:
+
+```bash
+sysext-gui-pro
+```
+
+## Testing
+
+An automated test suite is provided to verify the build pipeline, vendor relocations, `tmpfiles.d` fallback, declarative triggers, and cleanup:
+
+```bash
+python3 test-sysext-suite.py
+```
+
+## License
+
+GPL-2.0
