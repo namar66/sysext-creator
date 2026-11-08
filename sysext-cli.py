@@ -1,7 +1,9 @@
 #!/usr/bin/python3
-# Sysext Creator CLI v3.2
+# Sysext Creator CLI v3.2.4
+# Trigger execution (sysusers, schemas, mime, icons), SELinux lifecycle, desktop refresh
 # Safe deployment, SELinux policy installation & removal, desktop menu refresh
 # Safe input escaping, clean /etc symlink cleanup on removal, update command
+
 import os
 import sys
 import re
@@ -39,13 +41,11 @@ def run_pkexec_cmd(cmd_string, action_name):
 
 def refresh_desktop_environment():
     """Notifies KDE Plasma and GNOME to reload .desktop entries after overlay changes."""
-    # 1. KDE Plasma (kbuildsycoca6 nebo kbuildsycoca5)
     for ksycoca in ["kbuildsycoca6", "kbuildsycoca5"]:
         if shutil.which(ksycoca):
             subprocess.run([ksycoca], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             break
 
-    # 2. GNOME / XDG: Touch složky aplikací probudí GFileMonitor
     user_apps = os.path.expanduser("~/.local/share/applications")
     if os.path.exists(user_apps):
         try:
@@ -106,7 +106,7 @@ def cmd_list(args):
         print(f"{name:<22} | {version:<12} | {count:<10} | {size_str:<10} | Active")
 
 def cmd_remove(args):
-    """Removes an extension, its SELinux policies, and /etc symlinks cleanly."""
+    """Removes an extension, its SELinux policies, /etc symlinks, and cleans caches."""
     name = args.name
     validate_name(name)
 
@@ -114,6 +114,7 @@ def cmd_remove(args):
     cache_path = os.path.join(CACHE_DIR, f"{name}.raw")
     etc_manifest = os.path.join(MANIFEST_DIR, f"{name}-etc.txt")
     selinux_manifest = os.path.join(MANIFEST_DIR, f"{name}-selinux.txt")
+    triggers_manifest = os.path.join(MANIFEST_DIR, f"{name}-triggers.txt")
 
     if not os.path.exists(raw_path):
         print(f"❌ Extension '{name}' is not currently active.")
@@ -123,14 +124,13 @@ def cmd_remove(args):
 
     cleanup_cmds = []
 
-    # 1. Odinstalace SELinux modulů z hostitelského jádra (pokud existují)
+    # 1. Odinstalace SELinux modulů z jádra
     if os.path.exists(selinux_manifest):
         try:
             with open(selinux_manifest, 'r') as f:
                 for line in f:
                     mod_path = line.strip()
                     if mod_path:
-                        # Získáme název modulu bez přípony (.pp.bz2, .pp, .cil)
                         base_mod = os.path.basename(mod_path).split(".")[0]
                         cleanup_cmds.append(f"semodule -r {shlex.quote(base_mod)} 2>/dev/null || true")
         except Exception:
@@ -148,10 +148,31 @@ def cmd_remove(args):
         except Exception:
             pass
 
-    # 3. Odstranění souborů vrstvy a refresh
+    # 3. Zjištění triggerů k přegenerování cache po odpojení
+    triggers_to_cleanup = []
+    if os.path.exists(triggers_manifest):
+        try:
+            with open(triggers_manifest, 'r') as f:
+                triggers_to_cleanup = [t.strip() for t in f if t.strip()]
+        except Exception:
+            pass
+
+    # 4. Odstranění obrazu a reload
     cleanup_cmds.append(f"rm -f {shlex.quote(raw_path)} {shlex.quote(cache_path)}")
     cleanup_cmds.append("systemd-sysext refresh")
     cleanup_cmds.append("systemd-tmpfiles --create")
+
+    # 5. Obnova systémových cache po odebrání vrstvy
+    for trigger in triggers_to_cleanup:
+        if trigger == "glib-schemas":
+            cleanup_cmds.append("glib-compile-schemas /usr/share/glib-2.0/schemas 2>/dev/null || true")
+        elif trigger == "mime":
+            cleanup_cmds.append("update-mime-database /usr/share/mime 2>/dev/null || true")
+        elif trigger.startswith("icon-cache:"):
+            theme = trigger.split(":", 1)[1]
+            cleanup_cmds.append(f"gtk-update-icon-cache -q -t -f /usr/share/icons/{shlex.quote(theme)} 2>/dev/null || true")
+        elif trigger == "hwdb":
+            cleanup_cmds.append("systemd-hwdb update 2>/dev/null || true")
 
     full_shell_cmd = " && ".join(cleanup_cmds)
 
@@ -209,8 +230,6 @@ def cmd_install(args):
 
     print(f"\n📦 Deploying '{name}' to system...")
 
-    # Zjistíme, zda vrstva nese SELinux politiku uvnitř svého rootfs v toolboxu
-    # Po refreshi si přečteme manifest ze systému
     deploy_cmds = [
         f"mkdir -p {shlex.quote(EXTENSIONS_DIR)}",
         f"mv -f {shlex.quote(source_raw)} {shlex.quote(dest_raw)}",
@@ -218,7 +237,7 @@ def cmd_install(args):
         "systemd-tmpfiles --create"
     ]
 
-    # Skript po refreshi prověří přítomnost manifestu a zavede politiku do jádra
+    # SELinux loader blok
     selinux_loader = f"""
     if [ -f {shlex.quote(MANIFEST_DIR)}/{shlex.quote(name)}-selinux.txt ]; then
         echo "🛡️ Installing SELinux policy modules to host kernel..."
@@ -230,6 +249,34 @@ def cmd_install(args):
     fi
     """
     deploy_cmds.append(selinux_loader.strip())
+
+    # System triggers execution blok
+    triggers_executor = f"""
+    if [ -f {shlex.quote(MANIFEST_DIR)}/{shlex.quote(name)}-triggers.txt ]; then
+        echo "⚙️ Executing system cache and daemon triggers..."
+        while IFS= read -r trigger; do
+            case "$trigger" in
+                sysusers)
+                    systemd-sysusers
+                    ;;
+                glib-schemas)
+                    glib-compile-schemas /usr/share/glib-2.0/schemas 2>/dev/null || true
+                    ;;
+                mime)
+                    update-mime-database /usr/share/mime 2>/dev/null || true
+                    ;;
+                icon-cache:*)
+                    theme="${{trigger#icon-cache:}}"
+                    gtk-update-icon-cache -q -t -f "/usr/share/icons/$theme" 2>/dev/null || true
+                    ;;
+                hwdb)
+                    systemd-hwdb update 2>/dev/null || true
+                    ;;
+            esac
+        done < {shlex.quote(MANIFEST_DIR)}/{shlex.quote(name)}-triggers.txt
+    fi
+    """
+    deploy_cmds.append(triggers_executor.strip())
 
     full_shell_cmd = " && ".join(deploy_cmds)
 
