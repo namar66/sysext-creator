@@ -1,5 +1,8 @@
 #!/usr/bin/python3
 # Sysext-Creator Builder v3.2.4
+# Full pipeline: Fedora 45 DNF5 support, bin/sbin merge, opt relocation,
+# vendor /etc relocation, SELinux policy compilation (-n), trigger detection,
+# local RPM filtering, and EROFS LZ4 compression.
 # Smart /etc vendor relocation, SELinux compilation, trigger detection & RPM scriptlet inspection
 # Phase 1: Smart vendor relocation for /etc -> /usr, minimal tmpfiles.d fallback
 # bin/sbin merge, opt-relocation, systemd unit auto-reload
@@ -34,6 +37,7 @@ VENDOR_RELOCATIONS = {
 }
 
 def safe_rmtree(path):
+    """Recursively removes directory tree handling read-only permissions."""
     def on_error(func, p, exc_info):
         try:
             os.chmod(p, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
@@ -170,6 +174,7 @@ def calculate_host_dependencies(packages):
         sys.exit(1)
 
 def sync_host_repos():
+    """Synchronizes repository files and GPG keys from host supporting F45+ relocated paths."""
     logging.info("Syncing host repositories and GPG keys...")
     host_repo_dirs = [
         "/run/host/usr/share/dnf5/repos.d",
@@ -314,19 +319,15 @@ def detect_and_save_triggers(staging_root, manifest_dir, name):
     """Detects required system cache/daemon triggers and writes manifest."""
     triggers = []
 
-    # 1. System users & groups
     if os.path.exists(os.path.join(staging_root, "usr/lib/sysusers.d")):
         triggers.append("sysusers")
 
-    # 2. GSettings schemas
     if os.path.exists(os.path.join(staging_root, "usr/share/glib-2.0/schemas")):
         triggers.append("glib-schemas")
 
-    # 3. MIME database
     if os.path.exists(os.path.join(staging_root, "usr/share/mime/packages")):
         triggers.append("mime")
 
-    # 4. Icon caches
     icons_dir = os.path.join(staging_root, "usr/share/icons")
     if os.path.exists(icons_dir):
         for theme in os.listdir(icons_dir):
@@ -334,7 +335,6 @@ def detect_and_save_triggers(staging_root, manifest_dir, name):
                 triggers.append(f"icon-cache:{theme}")
         triggers.append("icon-cache:hicolor")
 
-    # 5. Udev HWDB
     if os.path.exists(os.path.join(staging_root, "usr/lib/udev/hwdb.d")):
         triggers.append("hwdb")
 
@@ -365,14 +365,33 @@ def main():
         os.makedirs(staging_root, exist_ok=True)
         os.makedirs(dnf_dir, exist_ok=True)
 
-        local_rpms = [p for p in requested_packages if p.endswith(".rpm") and os.path.isfile(p)]
+        local_rpms = [os.path.abspath(p) for p in requested_packages if p.endswith(".rpm") and os.path.isfile(p)]
         repo_packages = [p for p in requested_packages if p not in local_rpms]
         all_pkgs = repo_packages + local_rpms
+
+        local_pkg_names = set()
+        for rpm in local_rpms:
+            try:
+                res = subprocess.run(["rpm", "-qp", "--qf", "%{NAME}", rpm], capture_output=True, text=True, check=True)
+                if res.stdout.strip():
+                    local_pkg_names.add(res.stdout.strip())
+            except Exception:
+                pass
 
         if local_rpms:
             verify_rpms(local_rpms, is_local=True)
 
         missing_deps = calculate_host_dependencies(all_pkgs)
+
+        if local_pkg_names and missing_deps:
+            filtered_deps = []
+            for dep in missing_deps:
+                dep_name = dep.split(".")[0]
+                if dep_name in local_pkg_names:
+                    logging.info(f"Skipping repository download for local RPM: {dep}")
+                else:
+                    filtered_deps.append(dep)
+            missing_deps = filtered_deps
 
         if missing_deps:
             logging.info(f"Downloading {len(missing_deps)} packages to {dnf_dir}...")
@@ -382,7 +401,6 @@ def main():
 
         rpms_to_extract = local_rpms + [os.path.join(dnf_dir, f) for f in os.listdir(dnf_dir) if f.endswith(".rpm")]
 
-        # Inspekce RPM skriptletů
         inspect_rpm_scripts(rpms_to_extract)
 
         version = "unknown"
@@ -395,7 +413,6 @@ def main():
 
         logging.info(f"Detected version: {version}")
 
-        # Rozbalení RPM archivů
         for rpm in rpms_to_extract:
             ps = subprocess.Popen(["rpm2cpio", rpm], stdout=subprocess.PIPE)
             subprocess.run(["cpio", "-idmv"], stdin=ps.stdout, cwd=staging_root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -420,7 +437,7 @@ def main():
                         shutil.move(s_item, d_item)
             safe_rmtree(usr_sbin)
 
-        # 2. Relokace /opt do /usr/lib/opt
+        # 2. Relocate /opt to /usr/lib/opt
         opt_src = os.path.join(staging_root, "opt")
         if os.path.exists(opt_src):
             logging.info("Migrating /opt payload to /usr/lib/opt...")
@@ -432,13 +449,13 @@ def main():
                 shutil.move(s_item, d_item)
             safe_rmtree(opt_src)
 
-        # 3. Odstranění /var
+        # 3. Discard /var
         var_src = os.path.join(staging_root, "var")
         if os.path.exists(var_src):
             logging.warning("Discarding payload in /var (/var is not supported by systemd-sysext).")
             safe_rmtree(var_src)
 
-        # 4. Smart Vendor Relocation z /etc do /usr
+        # 4. Smart Vendor Relocation from /etc to /usr
         etc_src = os.path.join(staging_root, "etc")
         if os.path.exists(etc_src):
             for etc_rel, usr_rel in VENDOR_RELOCATIONS.items():
@@ -458,7 +475,7 @@ def main():
                     safe_rmtree(src_dir)
             clean_empty_directories(etc_src)
 
-        # 5. Fallback migrace přes tmpfiles.d
+        # 5. Fallback migration via tmpfiles.d
         migrated_etc_files = []
         if os.path.exists(etc_src) and os.listdir(etc_src):
             logging.info(f"Migrating non-relocatable /etc files to tmpfiles.d for {name}...")
@@ -488,10 +505,10 @@ def main():
         elif os.path.exists(etc_src):
             safe_rmtree(etc_src)
 
-        # 6. Smart Pruning vůči hostitelské RPM databázi
+        # 6. Smart Pruning against host RPMs
         prune_shadowed_files(staging_root)
 
-        # 7. SELinux zpracování
+        # 7. SELinux processing
         selinux_modules = []
         selinux_dirs = [
             os.path.join(staging_root, "usr/share/selinux/packages"),
@@ -518,7 +535,7 @@ def main():
             except Exception as e:
                 logging.warning(f"Could not compile SELinux policy inside container: {e}")
 
-        # 8. Kontrola systemd unitů
+        # 8. Check systemd units
         systemd_units_dir = os.path.join(staging_root, "usr", "lib", "systemd", "system")
         has_systemd_units = False
         if os.path.exists(systemd_units_dir):
@@ -539,7 +556,7 @@ def main():
                 f.write("EXTENSION_RELOAD_MANAGER=1\n")
                 logging.info("Detected systemd units: added EXTENSION_RELOAD_MANAGER=1 to release metadata.")
 
-        # 10. Generování manifestů a triggerů
+        # 10. Generate manifests and triggers
         manifest_dir = os.path.join(staging_root, "usr/share/sysext/manifests")
         os.makedirs(manifest_dir, exist_ok=True)
 
@@ -558,7 +575,6 @@ def main():
             with open(os.path.join(manifest_dir, f"{name}-selinux.txt"), "w") as f:
                 f.write("\n".join(rel_modules) + "\n")
 
-        # Detekce a zápis systémových triggerů
         detect_and_save_triggers(staging_root, manifest_dir, name)
 
         deps_list = []
@@ -576,11 +592,18 @@ def main():
         with open(os.path.join(manifest_dir, f"{name}-deps.txt"), "w") as f:
             f.write("\n".join(sorted(deps_list)) + "\n")
 
-        # 11. Tvorba EROFS obrazu
+        # 11. Build EROFS image with LZ4 compression
         out_file = os.path.join(CACHE_DIR, f"{name}.raw")
         tmp_out_file = out_file + ".tmp"
 
-        cmd = ["mkfs.erofs", "-x1", "-zlz4", "--all-root", "-U", "clear", "-T", "0"]
+        cmd = [
+            "mkfs.erofs",
+            "-zlz4",
+            "-x1",
+            "--all-root",
+            "-U", "clear",
+            "-T", "0"
+        ]
         if os.path.exists(active_file_contexts):
             cmd.append(f"--file-contexts={active_file_contexts}")
         cmd.extend([tmp_out_file, staging_root])
