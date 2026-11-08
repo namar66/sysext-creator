@@ -21,7 +21,7 @@ logging.basicConfig(
 )
 
 BIN_DIR = os.path.expanduser("~/.local/bin")
-CLI_PATH = os.path.join(BIN_DIR, "sysext-cli.py")
+CLI_PATH = os.path.join(BIN_DIR, "sysext-cli")
 
 PASS = "\033[92m[PASS]\033[0m"
 FAIL = "\033[91m[FAIL]\033[0m"
@@ -30,7 +30,9 @@ INFO = "\033[94m[INFO]\033[0m"
 
 class SysextTestSuite:
     def __init__(self):
-        self.work_dir = tempfile.mkdtemp(prefix="sysext-test-")
+        cache_base = os.path.expanduser("~/.cache/sysext-creator")
+        os.makedirs(cache_base, exist_ok=True)
+        self.work_dir = tempfile.mkdtemp(prefix="sysext-test-", dir=cache_base)
         self.rpm_dir = os.path.join(self.work_dir, "rpmbuild")
         self.layer_name = "test-synthetic-layer"
         self.test_results = []
