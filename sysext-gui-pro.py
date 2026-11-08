@@ -89,7 +89,7 @@ class AboutDialog(QDialog):
 
         text_label = QLabel(
             "<h2>Sysext Creator Pro</h2>"
-            "<p><b>Version:</b> 3.2 (Unified CLI Backend)</p>"
+            "<p><b>Version:</b> 3.2.4 (Unified CLI Backend)</p>"
             "<p>Robust, atomic userspace extensions on Fedora Kinoite / Silverblue.</p>"
             "<p>Features DNF5 compatibility, host OS smart pruning, /etc tmpfiles migration, and automated cleanup.</p>"
         )
