@@ -1,4 +1,4 @@
-# Sysext Creator (v3.1.1)
+# Sysext Creator (v3.2.4)
 
 ![License](https://img.shields.io/badge/license-GPLv2-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Fedora_Atomic-3870b2.svg)
